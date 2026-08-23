@@ -8,7 +8,15 @@ from pathlib import Path
 from flask import Flask, abort, redirect, render_template, request, send_file
 from waitress import serve
 
-from .db import data_dir, get_norm, init_db, list_sources, search_norms
+from .db import (
+    data_dir,
+    get_norm,
+    init_db,
+    latest_sync_run,
+    list_sources,
+    norm_stats,
+    search_norms,
+)
 
 
 def create_app() -> Flask:
@@ -46,6 +54,24 @@ def create_app() -> Flask:
         if row["pdf_url"]:
             return redirect(row["pdf_url"])
         abort(404)
+
+    @app.get("/status")
+    def status_page():
+        last_sync = latest_sync_run()
+        return render_template(
+            "status.html",
+            stats=norm_stats(),
+            last_sync=dict(last_sync) if last_sync else None,
+        )
+
+    @app.get("/api/status")
+    def status_api():
+        last_sync = latest_sync_run()
+        return {
+            "status": "ok",
+            "stats": norm_stats(),
+            "last_sync": dict(last_sync) if last_sync else None,
+        }
 
     @app.get("/healthz")
     def healthz():
