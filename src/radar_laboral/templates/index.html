@@ -6,7 +6,7 @@
   <title>Radar Laboral Perú</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
-    main { max-width: 1200px; margin: 0 auto; padding: 32px 20px; }
+    main { max-width: 1280px; margin: 0 auto; padding: 32px 20px; }
     h1 { margin-bottom: 6px; }
     .sub { color: #666; margin-top: 0; }
     form { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px 0; }
@@ -14,12 +14,16 @@
     input { flex: 1; min-width: 260px; }
     button { cursor: pointer; background: #222; color: white; }
     .table-wrap { overflow-x: auto; background: white; border: 1px solid #e5e5e5; border-radius: 10px; }
-    table { border-collapse: collapse; width: 100%; min-width: 900px; }
+    table { border-collapse: collapse; width: 100%; min-width: 1080px; }
     th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
     th { font-size: 13px; color: #555; background: #fafafa; }
     td { font-size: 14px; }
     .muted { color: #777; }
     .empty { padding: 36px; text-align: center; color: #666; }
+    .badge { display: inline-block; padding: 3px 7px; border-radius: 999px; font-size: 12px; background: #eee; white-space: nowrap; }
+    .badge-relevant { background: #dcfce7; }
+    .badge-review { background: #fef3c7; }
+    .badge-not_labor { background: #f1f5f9; color: #64748b; }
     a { color: inherit; }
   </style>
 </head>
@@ -36,6 +40,13 @@
         <option value="{{ item }}" {% if item == source %}selected{% endif %}>{{ item }}</option>
       {% endfor %}
     </select>
+    <select name="relevance">
+      <option value="tracked" {% if relevance == 'tracked' %}selected{% endif %}>Relevantes + revisar</option>
+      <option value="relevant" {% if relevance == 'relevant' %}selected{% endif %}>Solo relevantes</option>
+      <option value="review" {% if relevance == 'review' %}selected{% endif %}>Solo revisar</option>
+      <option value="not_labor" {% if relevance == 'not_labor' %}selected{% endif %}>No laborales</option>
+      <option value="all" {% if relevance == 'all' %}selected{% endif %}>Todos</option>
+    </select>
     <button type="submit">Buscar</button>
   </form>
 
@@ -44,7 +55,7 @@
       <table>
         <thead>
           <tr>
-            <th>Fecha</th><th>Norma</th><th>Título</th><th>Entidad</th><th>Tema</th><th>Estado</th><th>Fuente</th><th>PDF</th>
+            <th>Fecha</th><th>Norma</th><th>Título</th><th>Entidad</th><th>Tema</th><th>Relevancia</th><th>Estado</th><th>Fuente</th><th>PDF</th>
           </tr>
         </thead>
         <tbody>
@@ -55,6 +66,12 @@
             <td>{{ row.title }}{% if row.summary %}<br><span class="muted">{{ row.summary }}</span>{% endif %}</td>
             <td>{{ row.issuer or '—' }}</td>
             <td>{{ row.topic or '—' }}</td>
+            <td title="{{ row.relevance_reason or '' }}">
+              {% if row.labor_relevance == 'relevant' %}<span class="badge badge-relevant">Relevante</span>
+              {% elif row.labor_relevance == 'review' %}<span class="badge badge-review">Revisar</span>
+              {% elif row.labor_relevance == 'not_labor' %}<span class="badge badge-not_labor">No laboral</span>
+              {% else %}—{% endif %}
+            </td>
             <td>{{ row.status or '—' }}</td>
             <td><a href="{{ row.official_url }}" target="_blank" rel="noreferrer">{{ row.source }}</a></td>
             <td>{% if row.pdf_url or row.pdf_path %}<a href="/norm/{{ row.id }}/pdf" target="_blank">Abrir PDF</a>{% else %}—{% endif %}</td>
@@ -63,7 +80,7 @@
         </tbody>
       </table>
     {% else %}
-      <div class="empty">Todavía no hay normas cargadas. El siguiente paso es incorporar el primer colector oficial.</div>
+      <div class="empty">No hay registros para este filtro. Ejecuta la sincronización o cambia los criterios de búsqueda.</div>
     {% endif %}
   </div>
 </main>
