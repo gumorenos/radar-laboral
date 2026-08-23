@@ -71,14 +71,16 @@ class DatabaseMigrationTests(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(norms)")}
                 row = conn.execute(
-                    "SELECT labor_relevance, relevance_reason, topic FROM norms WHERE id = 'legacy:1'"
+                    "SELECT labor_relevance, relevance_reason, topic, edition FROM norms WHERE id = 'legacy:1'"
                 ).fetchone()
 
             self.assertIn("labor_relevance", columns)
             self.assertIn("relevance_reason", columns)
+            self.assertIn("edition", columns)
             self.assertEqual(row[0], "relevant")
             self.assertIn("materia laboral específica", row[1])
             self.assertIn("Teletrabajo", row[2])
+            self.assertIsNone(row[3])
 
 
 if __name__ == "__main__":
