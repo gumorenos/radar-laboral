@@ -8,6 +8,7 @@
     body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
     main { max-width: 1280px; margin: 0 auto; padding: 32px 20px; }
     h1 { margin-bottom: 6px; }
+    .header { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
     .sub { color: #666; margin-top: 0; }
     form { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px 0; }
     input, select, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; }
@@ -29,8 +30,13 @@
 </head>
 <body>
 <main>
-  <h1>Radar Laboral Perú</h1>
-  <p class="sub">Repositorio local y consultable de normativa laboral peruana.</p>
+  <div class="header">
+    <div>
+      <h1>Radar Laboral Perú</h1>
+      <p class="sub">Repositorio local y consultable de normativa laboral peruana.</p>
+    </div>
+    <a href="/status">Estado de sincronización →</a>
+  </div>
 
   <form method="get">
     <input name="q" value="{{ query }}" placeholder="Buscar por número, título, tema, entidad o resumen…">

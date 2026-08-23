@@ -1,9 +1,31 @@
+x-radar-environment: &radar-environment
+  RADAR_DATA_DIR: /data
+  RADAR_CATALOG_PATH: /data/catalog/norms.jsonl
+
 services:
   radar-laboral:
     build: .
+    image: radar-laboral:local
     container_name: radar-laboral
     restart: unless-stopped
+    environment:
+      <<: *radar-environment
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./storage:/data
+
+  radar-laboral-sync:
+    image: radar-laboral:local
+    container_name: radar-laboral-sync
+    restart: unless-stopped
+    command: ["radar-laboral-sync-daemon"]
+    environment:
+      <<: *radar-environment
+      RADAR_SYNC_INTERVAL_SECONDS: "21600"
+      RADAR_SYNC_INITIAL_DELAY_SECONDS: "15"
+    volumes:
+      - ./storage:/data
+    depends_on:
+      radar-laboral:
+        condition: service_healthy

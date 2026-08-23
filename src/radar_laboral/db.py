@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
@@ -98,6 +99,23 @@ CREATE INDEX IF NOT EXISTS idx_document_relations_from
     ON document_relations(from_kind, from_id);
 CREATE INDEX IF NOT EXISTS idx_document_relations_to
     ON document_relations(to_kind, to_id);
+
+CREATE TABLE IF NOT EXISTS sync_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    records_seen INTEGER NOT NULL DEFAULT 0,
+    relevant_count INTEGER NOT NULL DEFAULT 0,
+    review_count INTEGER NOT NULL DEFAULT 0,
+    pdf_count INTEGER NOT NULL DEFAULT 0,
+    latest_publication_date TEXT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_runs_source_started
+    ON sync_runs(source, started_at DESC);
 """
 
 NORM_COLUMNS = (
@@ -123,10 +141,15 @@ NORM_COLUMNS = (
 )
 
 
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
 def data_dir() -> Path:
     path = Path(os.getenv("RADAR_DATA_DIR", "storage")).expanduser().resolve()
     path.mkdir(parents=True, exist_ok=True)
     (path / "pdfs").mkdir(parents=True, exist_ok=True)
+    (path / "catalog").mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -135,8 +158,9 @@ def db_path() -> Path:
 
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path())
+    conn = sqlite3.connect(db_path(), timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
@@ -183,25 +207,33 @@ def _backfill_norm_classification(conn: sqlite3.Connection) -> None:
 
 def init_db() -> None:
     with connect() as conn:
+        conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
         _ensure_norm_columns(conn)
         _backfill_norm_classification(conn)
 
 
-def upsert_norm(record: Mapping[str, object]) -> None:
+def enrich_norm(record: Mapping[str, object]) -> dict[str, object]:
     enriched = dict(record)
     classification = classify_labor(enriched)
     enriched["labor_relevance"] = classification["labor_relevance"]
     enriched["relevance_reason"] = classification["relevance_reason"]
     if classification["topic"]:
         enriched["topic"] = classification["topic"]
+    return enriched
+
+
+def upsert_norm(record: Mapping[str, object]) -> dict[str, object]:
+    enriched = enrich_norm(record)
 
     if isinstance(record, dict):
-        record.update({
-            "labor_relevance": enriched["labor_relevance"],
-            "relevance_reason": enriched["relevance_reason"],
-            "topic": enriched.get("topic"),
-        })
+        record.update(
+            {
+                "labor_relevance": enriched["labor_relevance"],
+                "relevance_reason": enriched["relevance_reason"],
+                "topic": enriched.get("topic"),
+            }
+        )
 
     values = [enriched.get(column) for column in NORM_COLUMNS]
     placeholders = ", ".join("?" for _ in NORM_COLUMNS)
@@ -230,6 +262,7 @@ def upsert_norm(record: Mapping[str, object]) -> None:
     """
     with connect() as conn:
         conn.execute(sql, values)
+    return enriched
 
 
 def get_norm(norm_id: str):
@@ -283,3 +316,71 @@ def list_sources() -> list[str]:
             "SELECT DISTINCT source FROM norms WHERE source <> '' ORDER BY source"
         ).fetchall()
     return [row[0] for row in rows]
+
+
+def start_sync_run(source: str) -> int:
+    with connect() as conn:
+        cursor = conn.execute(
+            "INSERT INTO sync_runs (source, started_at, status) VALUES (?, ?, 'running')",
+            (source, utc_now()),
+        )
+        return int(cursor.lastrowid)
+
+
+def finish_sync_run(
+    run_id: int,
+    *,
+    status: str,
+    records_seen: int = 0,
+    relevant_count: int = 0,
+    review_count: int = 0,
+    pdf_count: int = 0,
+    latest_publication_date: str | None = None,
+    error: str | None = None,
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE sync_runs
+            SET finished_at = ?, status = ?, records_seen = ?, relevant_count = ?,
+                review_count = ?, pdf_count = ?, latest_publication_date = ?, error = ?
+            WHERE id = ?
+            """,
+            (
+                utc_now(),
+                status,
+                records_seen,
+                relevant_count,
+                review_count,
+                pdf_count,
+                latest_publication_date,
+                error,
+                run_id,
+            ),
+        )
+
+
+def latest_sync_run(source: str | None = None):
+    with connect() as conn:
+        if source:
+            return conn.execute(
+                "SELECT * FROM sync_runs WHERE source = ? ORDER BY id DESC LIMIT 1",
+                (source,),
+            ).fetchone()
+        return conn.execute("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def norm_stats() -> dict[str, int]:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN labor_relevance = 'relevant' THEN 1 ELSE 0 END) AS relevant,
+                SUM(CASE WHEN labor_relevance = 'review' THEN 1 ELSE 0 END) AS review,
+                SUM(CASE WHEN labor_relevance = 'not_labor' THEN 1 ELSE 0 END) AS not_labor,
+                SUM(CASE WHEN pdf_path IS NOT NULL THEN 1 ELSE 0 END) AS pdf_cached
+            FROM norms
+            """
+        ).fetchone()
+    return {key: int(row[key] or 0) for key in row.keys()}

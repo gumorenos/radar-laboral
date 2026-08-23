@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,14 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from radar_laboral.db import data_dir, init_db, upsert_norm
+from radar_laboral.db import (
+    data_dir,
+    finish_sync_run,
+    get_norm,
+    init_db,
+    start_sync_run,
+    upsert_norm,
+)
 
 SOURCE = "El Peruano"
 BASE_URL = "https://diariooficial.elperuano.pe"
@@ -26,6 +34,13 @@ URL_RE = re.compile(r"https?://[^\"'<>\s]+", re.I)
 
 class CollectorError(RuntimeError):
     pass
+
+
+def default_catalog_path() -> Path:
+    configured = os.getenv("RADAR_CATALOG_PATH")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path("catalog/norms.jsonl")
 
 
 def _iso_date(value: str) -> str:
@@ -205,12 +220,29 @@ def _candidate_pdf_urls(html: str, base_url: str) -> list[str]:
     return unique
 
 
+def _existing_pdf_digest(path: Path) -> str | None:
+    try:
+        with path.open("rb") as handle:
+            first = handle.read(64 * 1024)
+            if not first.startswith(b"%PDF"):
+                return None
+            digest = hashlib.sha256()
+            digest.update(first)
+            for chunk in iter(lambda: handle.read(64 * 1024), b""):
+                digest.update(chunk)
+            return digest.hexdigest()
+    except OSError:
+        return None
+
+
 def _download_if_pdf(session: requests.Session, url: str, destination: Path) -> tuple[str, str] | None:
     if not _allowed_el_peruano_url(url):
         return None
 
     with session.get(url, timeout=45, stream=True, allow_redirects=True) as response:
         response.raise_for_status()
+        if not _allowed_el_peruano_url(response.url):
+            return None
         content_type = response.headers.get("content-type", "").lower()
         iterator = response.iter_content(chunk_size=64 * 1024)
         try:
@@ -241,6 +273,35 @@ def _storage_key(record_id: object) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", key).strip("-") or "document"
 
 
+def _restore_cached_pdf(record: dict[str, str | None], destination: Path, relative_path: Path) -> bool:
+    existing = get_norm(str(record["id"]))
+    if existing is not None and existing["pdf_path"]:
+        stored_path = Path(existing["pdf_path"])
+        if not stored_path.is_absolute():
+            stored_path = data_dir() / stored_path
+        digest = _existing_pdf_digest(stored_path)
+        expected_digest = str(existing["sha256"] or "")
+        if digest and expected_digest and digest != expected_digest:
+            try:
+                stored_path.unlink()
+            except OSError:
+                pass
+            digest = None
+        if digest:
+            record["pdf_path"] = str(existing["pdf_path"])
+            record["sha256"] = digest
+            if existing["pdf_url"]:
+                record["pdf_url"] = str(existing["pdf_url"])
+            return True
+
+    digest = _existing_pdf_digest(destination)
+    if digest:
+        record["pdf_path"] = relative_path.as_posix()
+        record["sha256"] = digest
+        return True
+    return False
+
+
 def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
     viewer_url = record.get("pdf_url")
     if not viewer_url:
@@ -251,6 +312,9 @@ def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
     relative_path = Path("pdfs") / "elperuano" / year / f"{_storage_key(record['id'])}.pdf"
     destination = data_dir() / relative_path
 
+    if _restore_cached_pdf(record, destination, relative_path):
+        return
+
     direct = _download_if_pdf(session, viewer_url, destination)
     if direct:
         record["pdf_url"], record["sha256"] = direct
@@ -259,6 +323,8 @@ def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
 
     response = session.get(viewer_url, timeout=30)
     response.raise_for_status()
+    if not _allowed_el_peruano_url(response.url):
+        return
     for candidate in _candidate_pdf_urls(response.text, response.url):
         downloaded = _download_if_pdf(session, candidate, destination)
         if downloaded:
@@ -267,7 +333,7 @@ def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
             return
 
 
-def merge_catalog(records: list[dict[str, str | None]], path: Path) -> None:
+def merge_catalog(records: list[dict[str, object]], path: Path) -> None:
     current: dict[str, dict] = {}
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -299,41 +365,87 @@ def merge_catalog(records: list[dict[str, str | None]], path: Path) -> None:
     )
 
 
-def collect(*, download_pdfs: bool = True, catalog_path: Path = Path("catalog/norms.jsonl")) -> list[dict[str, str | None]]:
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "radar-laboral/0.1 (+https://github.com/gumorenos/radar-laboral)",
-        "Accept-Language": "es-PE,es;q=0.9",
-    })
-
-    response = session.get(DAILY_URL, timeout=30)
-    response.raise_for_status()
-    records = parse_daily_html(response.text)
-    if not records:
-        raise CollectorError("El Peruano no devolvió dispositivos reconocibles; se evita escribir un catálogo vacío.")
-
+def collect(
+    *,
+    download_pdfs: bool = True,
+    catalog_path: Path | None = None,
+) -> list[dict[str, object]]:
+    catalog_path = catalog_path or default_catalog_path()
     init_db()
-    for record in records:
-        if download_pdfs:
-            try:
-                cache_pdf(session, record)
-            except requests.RequestException:
-                pass
-        upsert_norm(record)
+    run_id = start_sync_run(SOURCE)
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": "radar-laboral/0.1 (+https://github.com/gumorenos/radar-laboral)",
+            "Accept-Language": "es-PE,es;q=0.9",
+        }
+    )
 
-    merge_catalog(records, catalog_path)
-    return records
+    try:
+        response = session.get(DAILY_URL, timeout=30)
+        response.raise_for_status()
+        records = parse_daily_html(response.text)
+        if not records:
+            raise CollectorError(
+                "El Peruano no devolvió dispositivos reconocibles; se evita escribir un catálogo vacío."
+            )
+
+        enriched_records: list[dict[str, object]] = []
+        for record in records:
+            if download_pdfs:
+                try:
+                    cache_pdf(session, record)
+                except requests.RequestException:
+                    pass
+            enriched_records.append(upsert_norm(record))
+
+        merge_catalog(enriched_records, catalog_path)
+        relevant_count = sum(
+            1 for item in enriched_records if item.get("labor_relevance") == "relevant"
+        )
+        review_count = sum(
+            1 for item in enriched_records if item.get("labor_relevance") == "review"
+        )
+        pdf_count = sum(1 for item in enriched_records if item.get("pdf_path"))
+        latest_date = max(
+            (str(item.get("publication_date")) for item in enriched_records if item.get("publication_date")),
+            default=None,
+        )
+        finish_sync_run(
+            run_id,
+            status="success",
+            records_seen=len(enriched_records),
+            relevant_count=relevant_count,
+            review_count=review_count,
+            pdf_count=pdf_count,
+            latest_publication_date=latest_date,
+        )
+        return enriched_records
+    except Exception as exc:
+        finish_sync_run(
+            run_id,
+            status="failed",
+            error=f"{type(exc).__name__}: {exc}"[:2000],
+        )
+        raise
+    finally:
+        session.close()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sincroniza las normas del día desde El Peruano")
     parser.add_argument("--no-pdf", action="store_true", help="No intenta descargar los PDF oficiales")
-    parser.add_argument("--catalog", type=Path, default=Path("catalog/norms.jsonl"))
+    parser.add_argument("--catalog", type=Path, default=default_catalog_path())
     args = parser.parse_args()
 
     records = collect(download_pdfs=not args.no_pdf, catalog_path=args.catalog)
     pdf_count = sum(1 for item in records if item.get("pdf_path"))
-    print(f"El Peruano: {len(records)} registros sincronizados; {pdf_count} PDF almacenados.")
+    relevant_count = sum(1 for item in records if item.get("labor_relevance") == "relevant")
+    review_count = sum(1 for item in records if item.get("labor_relevance") == "review")
+    print(
+        f"El Peruano: {len(records)} registros; {relevant_count} relevantes; "
+        f"{review_count} por revisar; {pdf_count} PDF almacenados."
+    )
 
 
 if __name__ == "__main__":
