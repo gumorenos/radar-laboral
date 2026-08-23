@@ -25,6 +25,7 @@
     .badge-relevant { background: #dcfce7; }
     .badge-review { background: #fef3c7; }
     .badge-not_labor { background: #f1f5f9; color: #64748b; }
+    .badge-extraordinary { background: #ede9fe; margin-top: 5px; }
     a { color: inherit; }
   </style>
 </head>
@@ -67,7 +68,10 @@
         <tbody>
           {% for row in rows %}
           <tr>
-            <td>{{ row.publication_date or '—' }}</td>
+            <td>
+              {{ row.publication_date or '—' }}
+              {% if row.edition == 'extraordinary' %}<br><span class="badge badge-extraordinary">Extraordinaria</span>{% endif %}
+            </td>
             <td><strong>{{ row.document_type or '' }} {{ row.number or '' }}</strong></td>
             <td>{{ row.title }}{% if row.summary %}<br><span class="muted">{{ row.summary }}</span>{% endif %}</td>
             <td>{{ row.issuer or '—' }}</td>
