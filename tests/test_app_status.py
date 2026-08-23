@@ -6,7 +6,29 @@ import unittest
 from unittest.mock import patch
 
 from radar_laboral.app import create_app
-from radar_laboral.db import finish_sync_run, start_sync_run
+from radar_laboral.db import finish_sync_run, start_sync_run, upsert_norm
+
+
+def _record(record_id: str, title: str, issuer: str, document_type: str = "RESOLUCIÓN") -> dict[str, object]:
+    return {
+        "id": record_id,
+        "source": "El Peruano",
+        "document_type": document_type,
+        "number": None,
+        "title": title,
+        "summary": None,
+        "publication_date": "2026-08-23",
+        "effective_date": None,
+        "issuer": issuer,
+        "topic": None,
+        "status": None,
+        "official_url": f"https://example.invalid/{record_id}",
+        "pdf_url": None,
+        "pdf_path": None,
+        "sha256": None,
+        "captured_at": "2026-08-23T05:00:00+00:00",
+        "updated_at": "2026-08-23T05:00:00+00:00",
+    }
 
 
 class AppStatusTests(unittest.TestCase):
@@ -26,6 +48,37 @@ class AppStatusTests(unittest.TestCase):
         response = self.client.get("/healthz")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "ok"})
+
+    def test_home_defaults_to_relevant_labor_norms_only(self) -> None:
+        upsert_norm(
+            _record(
+                "relevant",
+                "Modifican disposiciones sobre teletrabajo y jornada laboral",
+                "PODER EJECUTIVO",
+                "DECRETO SUPREMO",
+            )
+        )
+        upsert_norm(
+            _record(
+                "review",
+                "Aprueban lineamientos institucionales para el año 2026",
+                "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            )
+        )
+        upsert_norm(
+            _record(
+                "not-labor",
+                "Aprueban medidas relacionadas con trabajadores de la entidad",
+                "OTRA ENTIDAD",
+            )
+        )
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"teletrabajo", response.data)
+        self.assertNotIn(b"lineamientos institucionales", response.data)
+        self.assertNotIn(b"trabajadores de la entidad", response.data)
+        self.assertIn(b"Solo laborales relevantes", response.data)
 
     def test_status_api_reports_latest_sync(self) -> None:
         run_id = start_sync_run("El Peruano")

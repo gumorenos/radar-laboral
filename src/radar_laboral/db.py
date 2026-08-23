@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
-from .classifier import classify_labor
+from .classifier import CLASSIFIER_VERSION, classify_labor
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS norms (
@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS norms (
     status TEXT,
     labor_relevance TEXT,
     relevance_reason TEXT,
+    classification_version INTEGER,
     official_url TEXT NOT NULL,
     pdf_url TEXT,
     pdf_path TEXT,
@@ -132,6 +133,7 @@ NORM_COLUMNS = (
     "status",
     "labor_relevance",
     "relevance_reason",
+    "classification_version",
     "official_url",
     "pdf_url",
     "pdf_path",
@@ -169,6 +171,7 @@ def _ensure_norm_columns(conn: sqlite3.Connection) -> None:
     additions = {
         "labor_relevance": "TEXT",
         "relevance_reason": "TEXT",
+        "classification_version": "INTEGER",
     }
     for column, sql_type in additions.items():
         if column not in existing:
@@ -183,8 +186,12 @@ def _backfill_norm_classification(conn: sqlite3.Connection) -> None:
         """
         SELECT id, source, document_type, number, title, summary, issuer, topic
         FROM norms
-        WHERE labor_relevance IS NULL OR relevance_reason IS NULL
-        """
+        WHERE labor_relevance IS NULL
+           OR relevance_reason IS NULL
+           OR classification_version IS NULL
+           OR classification_version < ?
+        """,
+        (CLASSIFIER_VERSION,),
     ).fetchall()
     for row in rows:
         classification = classify_labor(dict(row))
@@ -193,13 +200,15 @@ def _backfill_norm_classification(conn: sqlite3.Connection) -> None:
             UPDATE norms
             SET labor_relevance = ?,
                 relevance_reason = ?,
-                topic = COALESCE(?, topic)
+                topic = ?,
+                classification_version = ?
             WHERE id = ?
             """,
             (
                 classification["labor_relevance"],
                 classification["relevance_reason"],
                 classification["topic"],
+                classification["classification_version"],
                 row["id"],
             ),
         )
@@ -218,8 +227,8 @@ def enrich_norm(record: Mapping[str, object]) -> dict[str, object]:
     classification = classify_labor(enriched)
     enriched["labor_relevance"] = classification["labor_relevance"]
     enriched["relevance_reason"] = classification["relevance_reason"]
-    if classification["topic"]:
-        enriched["topic"] = classification["topic"]
+    enriched["classification_version"] = classification["classification_version"]
+    enriched["topic"] = classification["topic"]
     return enriched
 
 
@@ -231,6 +240,7 @@ def upsert_norm(record: Mapping[str, object]) -> dict[str, object]:
             {
                 "labor_relevance": enriched["labor_relevance"],
                 "relevance_reason": enriched["relevance_reason"],
+                "classification_version": enriched["classification_version"],
                 "topic": enriched.get("topic"),
             }
         )
@@ -250,10 +260,11 @@ def upsert_norm(record: Mapping[str, object]) -> dict[str, object]:
             publication_date = COALESCE(excluded.publication_date, norms.publication_date),
             effective_date = COALESCE(excluded.effective_date, norms.effective_date),
             issuer = COALESCE(excluded.issuer, norms.issuer),
-            topic = COALESCE(excluded.topic, norms.topic),
+            topic = excluded.topic,
             status = COALESCE(excluded.status, norms.status),
             labor_relevance = excluded.labor_relevance,
             relevance_reason = excluded.relevance_reason,
+            classification_version = excluded.classification_version,
             official_url = excluded.official_url,
             pdf_url = COALESCE(excluded.pdf_url, norms.pdf_url),
             pdf_path = COALESCE(excluded.pdf_path, norms.pdf_path),
@@ -273,7 +284,7 @@ def get_norm(norm_id: str):
 def search_norms(
     query: str = "",
     source: str = "",
-    relevance: str = "tracked",
+    relevance: str = "relevant",
     limit: int = 200,
 ):
     clauses: list[str] = []

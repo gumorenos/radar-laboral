@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from radar_laboral.classifier import classify_labor
+from radar_laboral.classifier import CLASSIFIER_VERSION, classify_labor
 
 
 class LaborClassifierTests(unittest.TestCase):
@@ -16,6 +16,7 @@ class LaborClassifierTests(unittest.TestCase):
         self.assertEqual(result["labor_relevance"], "relevant")
         self.assertIn("Teletrabajo", result["topic"] or "")
         self.assertIn("Jornada y descansos", result["topic"] or "")
+        self.assertEqual(result["classification_version"], CLASSIFIER_VERSION)
 
     def test_mtpe_personnel_appointment_is_not_labor_rule(self) -> None:
         result = classify_labor({
@@ -27,11 +28,30 @@ class LaborClassifierTests(unittest.TestCase):
         self.assertEqual(result["labor_relevance"], "not_labor")
         self.assertIn("acto administrativo", result["relevance_reason"] or "")
 
-    def test_generic_labor_signal_goes_to_review(self) -> None:
+    def test_generic_labor_word_outside_labor_authority_is_not_enough(self) -> None:
         result = classify_labor({
             "issuer": "OTRA ENTIDAD",
             "document_type": "RESOLUCIÓN",
             "title": "Aprueban medidas relacionadas con trabajadores de la entidad",
+        })
+
+        self.assertEqual(result["labor_relevance"], "not_labor")
+        self.assertIn("señal laboral genérica insuficiente", result["relevance_reason"] or "")
+
+    def test_general_scope_rule_with_generic_labor_signal_goes_to_review(self) -> None:
+        result = classify_labor({
+            "issuer": "PODER EJECUTIVO",
+            "document_type": "DECRETO SUPREMO",
+            "title": "Aprueban medidas aplicables a trabajadores del sector privado",
+        })
+
+        self.assertEqual(result["labor_relevance"], "review")
+
+    def test_labor_authority_document_without_specific_topic_goes_to_review(self) -> None:
+        result = classify_labor({
+            "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            "document_type": "RESOLUCIÓN MINISTERIAL",
+            "title": "Aprueban lineamientos institucionales para el año 2026",
         })
 
         self.assertEqual(result["labor_relevance"], "review")
