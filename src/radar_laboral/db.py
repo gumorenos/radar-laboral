@@ -58,6 +58,11 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
 
 
+def get_norm(norm_id: str):
+    with connect() as conn:
+        return conn.execute("SELECT * FROM norms WHERE id = ?", (norm_id,)).fetchone()
+
+
 def search_norms(query: str = "", source: str = "", limit: int = 200):
     clauses: list[str] = []
     params: list[str | int] = []
