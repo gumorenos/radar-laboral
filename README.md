@@ -33,8 +33,9 @@ La primera versión se concentra en normas y cubre:
 4. Colector determinístico de El Peruano.
 5. Clasificación determinística de relevancia laboral.
 6. Sincronización periódica, deduplicación y registro de ejecuciones.
-7. Docker para servidor Linux.
-8. Preparación para empaquetado portable en Windows.
+7. Backfill histórico determinístico por rango de fechas.
+8. Docker para servidor Linux.
+9. Preparación para empaquetado portable en Windows.
 
 La jurisprudencia y la biblioteca de conceptos están contempladas en el modelo desde el inicio, pero se incorporarán después de estabilizar la captura de normativa.
 
@@ -77,7 +78,7 @@ radar-laboral-sync
 
 El comando consulta la publicación de Normas Legales, normaliza los dispositivos encontrados, clasifica su relevancia laboral, hace `upsert` en SQLite y actualiza el catálogo JSONL.
 
-Cuando puede resolver el documento PDF real desde la fuente oficial, guarda una copia en `storage/pdfs/elperuano/<año>/` y calcula su SHA-256. Una ejecución posterior reutiliza el archivo si su hash continúa siendo válido. Si el archivo cambió, se descarta y vuelve a obtenerse desde la fuente oficial.
+El inventario conserva todos los dispositivos detectados. Para evitar convertir la instalación en un archivo masivo de documentos no laborales, la copia PDF local se descarga solo para registros clasificados como `Relevante` o `Revisar`. Cada PDF local conserva SHA-256 y se vuelve a obtener desde la fuente oficial si su contenido deja de coincidir con el hash registrado.
 
 Para comprobar solo metadatos sin intentar descargar PDF:
 
@@ -92,6 +93,34 @@ radar-laboral-sync-daemon
 ```
 
 Por defecto sincroniza cada 6 horas. Puede cambiarse con `RADAR_SYNC_INTERVAL_SECONDS`; el programa impone un mínimo de una hora para no consultar innecesariamente la fuente oficial.
+
+## Carga histórica
+
+El buscador oficial de El Peruano permite consultar dispositivos de Normas Legales por fecha. Radar Laboral usa ese mecanismo para reconstruir el histórico día por día y verificar que la cantidad de registros normalizados coincida con el total informado por la fuente.
+
+Ejemplo, primero solo metadatos:
+
+```bash
+radar-laboral-backfill --from 2026-01-01 --to 2026-01-31 --no-pdf
+```
+
+Luego, si se desea completar las copias locales de los documentos laborales del mismo rango:
+
+```bash
+radar-laboral-backfill --from 2026-01-01 --to 2026-01-31
+```
+
+El backfill:
+
+- consulta un día por vez;
+- pagina los resultados del buscador oficial;
+- deduplica por Orden de Publicación (OP);
+- conserva también dispositivos oficiales sin número;
+- aborta si El Peruano declara más dispositivos de los que el parser logró normalizar;
+- hace `upsert`, por lo que repetir un rango no duplica registros;
+- descarga PDF únicamente para `Relevante` y `Revisar` salvo que se use `--no-pdf`.
+
+Para históricos grandes conviene ejecutarlo por meses o trimestres. Así es más sencillo revisar falsos positivos, reanudar un rango y controlar el crecimiento de `storage/`.
 
 ## Docker
 
@@ -153,4 +182,4 @@ Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación. Los PDF
 
 ## Estado del proyecto
 
-Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, colector de El Peruano, clasificación laboral, cache verificable de PDFs, sincronización automática y estructura futura para jurisprudencia y conceptos laborales. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
+Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, colector de El Peruano, clasificación laboral, cache verificable de PDFs, sincronización automática, backfill histórico y estructura futura para jurisprudencia y conceptos laborales. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
