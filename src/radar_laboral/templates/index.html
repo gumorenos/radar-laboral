@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Radar Laboral Perú</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
+    main { max-width: 1200px; margin: 0 auto; padding: 32px 20px; }
+    h1 { margin-bottom: 6px; }
+    .sub { color: #666; margin-top: 0; }
+    form { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px 0; }
+    input, select, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; }
+    input { flex: 1; min-width: 260px; }
+    button { cursor: pointer; background: #222; color: white; }
+    .table-wrap { overflow-x: auto; background: white; border: 1px solid #e5e5e5; border-radius: 10px; }
+    table { border-collapse: collapse; width: 100%; min-width: 900px; }
+    th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
+    th { font-size: 13px; color: #555; background: #fafafa; }
+    td { font-size: 14px; }
+    .muted { color: #777; }
+    .empty { padding: 36px; text-align: center; color: #666; }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Radar Laboral Perú</h1>
+  <p class="sub">Repositorio local y consultable de normativa laboral peruana.</p>
+
+  <form method="get">
+    <input name="q" value="{{ query }}" placeholder="Buscar por número, título, tema, entidad o resumen…">
+    <select name="source">
+      <option value="">Todas las fuentes</option>
+      {% for item in sources %}
+        <option value="{{ item }}" {% if item == source %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Buscar</button>
+  </form>
+
+  <div class="table-wrap">
+    {% if rows %}
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Norma</th><th>Título</th><th>Entidad</th><th>Tema</th><th>Estado</th><th>Fuente</th><th>PDF</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.publication_date or '—' }}</td>
+            <td><strong>{{ row.document_type or '' }} {{ row.number or '' }}</strong></td>
+            <td>{{ row.title }}{% if row.summary %}<br><span class="muted">{{ row.summary }}</span>{% endif %}</td>
+            <td>{{ row.issuer or '—' }}</td>
+            <td>{{ row.topic or '—' }}</td>
+            <td>{{ row.status or '—' }}</td>
+            <td><a href="{{ row.official_url }}" target="_blank" rel="noreferrer">{{ row.source }}</a></td>
+            <td>{% if row.pdf_url or row.pdf_path %}<a href="/norm/{{ row.id }}/pdf" target="_blank">Abrir PDF</a>{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">Todavía no hay normas cargadas. El siguiente paso es incorporar el primer colector oficial.</div>
+    {% endif %}
+  </div>
+</main>
+</body>
+</html>
