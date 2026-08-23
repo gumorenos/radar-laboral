@@ -27,4 +27,5 @@ services:
     volumes:
       - ./storage:/data
     depends_on:
-      - radar-laboral
+      radar-laboral:
+        condition: service_healthy
