@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Mapping
 
+from .classifier import classify_labor
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS norms (
     id TEXT PRIMARY KEY,
@@ -18,6 +20,8 @@ CREATE TABLE IF NOT EXISTS norms (
     issuer TEXT,
     topic TEXT,
     status TEXT,
+    labor_relevance TEXT,
+    relevance_reason TEXT,
     official_url TEXT NOT NULL,
     pdf_url TEXT,
     pdf_path TEXT,
@@ -34,6 +38,8 @@ CREATE INDEX IF NOT EXISTS idx_norms_source
     ON norms(source);
 CREATE INDEX IF NOT EXISTS idx_norms_topic
     ON norms(topic);
+CREATE INDEX IF NOT EXISTS idx_norms_labor_relevance
+    ON norms(labor_relevance);
 
 CREATE TABLE IF NOT EXISTS case_law (
     id TEXT PRIMARY KEY,
@@ -108,6 +114,8 @@ NORM_COLUMNS = (
     "issuer",
     "topic",
     "status",
+    "labor_relevance",
+    "relevance_reason",
     "official_url",
     "pdf_url",
     "pdf_path",
@@ -134,13 +142,35 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_norm_columns(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(norms)").fetchall()}
+    additions = {
+        "labor_relevance": "TEXT",
+        "relevance_reason": "TEXT",
+    }
+    for column, sql_type in additions.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE norms ADD COLUMN {column} {sql_type}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_norms_labor_relevance ON norms(labor_relevance)"
+    )
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _ensure_norm_columns(conn)
 
 
 def upsert_norm(record: Mapping[str, object]) -> None:
-    values = [record.get(column) for column in NORM_COLUMNS]
+    enriched = dict(record)
+    classification = classify_labor(enriched)
+    enriched["labor_relevance"] = classification["labor_relevance"]
+    enriched["relevance_reason"] = classification["relevance_reason"]
+    if classification["topic"]:
+        enriched["topic"] = classification["topic"]
+
+    values = [enriched.get(column) for column in NORM_COLUMNS]
     placeholders = ", ".join("?" for _ in NORM_COLUMNS)
     columns = ", ".join(NORM_COLUMNS)
     sql = f"""
@@ -157,6 +187,8 @@ def upsert_norm(record: Mapping[str, object]) -> None:
             issuer = COALESCE(excluded.issuer, norms.issuer),
             topic = COALESCE(excluded.topic, norms.topic),
             status = COALESCE(excluded.status, norms.status),
+            labor_relevance = excluded.labor_relevance,
+            relevance_reason = excluded.relevance_reason,
             official_url = excluded.official_url,
             pdf_url = COALESCE(excluded.pdf_url, norms.pdf_url),
             pdf_path = COALESCE(excluded.pdf_path, norms.pdf_path),
@@ -172,7 +204,12 @@ def get_norm(norm_id: str):
         return conn.execute("SELECT * FROM norms WHERE id = ?", (norm_id,)).fetchone()
 
 
-def search_norms(query: str = "", source: str = "", limit: int = 200):
+def search_norms(
+    query: str = "",
+    source: str = "",
+    relevance: str = "tracked",
+    limit: int = 200,
+):
     clauses: list[str] = []
     params: list[str | int] = []
 
@@ -186,6 +223,12 @@ def search_norms(query: str = "", source: str = "", limit: int = 200):
     if source:
         clauses.append("source = ?")
         params.append(source)
+
+    if relevance == "tracked":
+        clauses.append("labor_relevance IN ('relevant', 'review')")
+    elif relevance in {"relevant", "review", "not_labor"}:
+        clauses.append("labor_relevance = ?")
+        params.append(relevance)
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     sql = f"""
