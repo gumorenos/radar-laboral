@@ -280,9 +280,16 @@ def _restore_cached_pdf(record: dict[str, str | None], destination: Path, relati
         if not stored_path.is_absolute():
             stored_path = data_dir() / stored_path
         digest = _existing_pdf_digest(stored_path)
+        expected_digest = str(existing["sha256"] or "")
+        if digest and expected_digest and digest != expected_digest:
+            try:
+                stored_path.unlink()
+            except OSError:
+                pass
+            digest = None
         if digest:
             record["pdf_path"] = str(existing["pdf_path"])
-            record["sha256"] = str(existing["sha256"] or digest)
+            record["sha256"] = digest
             if existing["pdf_url"]:
                 record["pdf_url"] = str(existing["pdf_url"])
             return True
