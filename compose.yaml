@@ -26,6 +26,8 @@ services:
       RADAR_SYNC_INITIAL_DELAY_SECONDS: "15"
     volumes:
       - ./storage:/data
+    healthcheck:
+      disable: true
     depends_on:
       radar-laboral:
         condition: service_healthy
