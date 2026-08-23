@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estado · Radar Laboral Perú</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
+    main { max-width: 960px; margin: 0 auto; padding: 32px 20px; }
+    a { color: inherit; }
+    .top { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+    .sub { color: #666; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 24px 0; }
+    .card, .panel { background: white; border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; }
+    .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .label { color: #666; font-size: 13px; }
+    dl { display: grid; grid-template-columns: minmax(170px, 220px) 1fr; gap: 10px 16px; margin: 0; }
+    dt { color: #666; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .ok { color: #166534; font-weight: 600; }
+    .failed { color: #991b1b; font-weight: 600; }
+    code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <h1>Estado del Radar</h1>
+      <p class="sub">Datos locales, cache de PDFs y última sincronización.</p>
+    </div>
+    <a href="/">← Volver a normas</a>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Registros</div><div class="value">{{ stats.total }}</div></div>
+    <div class="card"><div class="label">Relevantes</div><div class="value">{{ stats.relevant }}</div></div>
+    <div class="card"><div class="label">Por revisar</div><div class="value">{{ stats.review }}</div></div>
+    <div class="card"><div class="label">PDFs locales</div><div class="value">{{ stats.pdf_cached }}</div></div>
+  </div>
+
+  <section class="panel">
+    <h2>Última sincronización</h2>
+    {% if last_sync %}
+      <dl>
+        <dt>Fuente</dt><dd>{{ last_sync.source }}</dd>
+        <dt>Estado</dt>
+        <dd class="{% if last_sync.status == 'success' %}ok{% elif last_sync.status == 'failed' %}failed{% endif %}">{{ last_sync.status }}</dd>
+        <dt>Inicio</dt><dd>{{ last_sync.started_at }}</dd>
+        <dt>Fin</dt><dd>{{ last_sync.finished_at or 'En curso' }}</dd>
+        <dt>Documentos encontrados</dt><dd>{{ last_sync.records_seen }}</dd>
+        <dt>Relevantes</dt><dd>{{ last_sync.relevant_count }}</dd>
+        <dt>Por revisar</dt><dd>{{ last_sync.review_count }}</dd>
+        <dt>PDFs disponibles</dt><dd>{{ last_sync.pdf_count }}</dd>
+        <dt>Publicación más reciente</dt><dd>{{ last_sync.latest_publication_date or '—' }}</dd>
+        {% if last_sync.error %}<dt>Error</dt><dd><code>{{ last_sync.error }}</code></dd>{% endif %}
+      </dl>
+    {% else %}
+      <p class="sub">Todavía no se ha ejecutado ninguna sincronización.</p>
+    {% endif %}
+  </section>
+</main>
+</body>
+</html>
