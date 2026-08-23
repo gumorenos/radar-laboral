@@ -15,6 +15,7 @@ from radar_laboral.db import data_dir, init_db, upsert_norm
 
 SOURCE = "El Peruano"
 BASE_URL = "https://diariooficial.elperuano.pe"
+BUSQUEDAS_URL = "https://busquedas.elperuano.pe"
 DAILY_URL = f"{BASE_URL}/Normas/LoadNormasLegales?Length=0"
 ALLOWED_PDF_HOST_SUFFIX = ".elperuano.pe"
 DEVICE_RE = re.compile(r"/dispositivo/NL/(?P<op>[0-9]+-[0-9]+)(?:/)?$", re.I)
@@ -34,6 +35,13 @@ def _iso_date(value: str) -> str:
 def _allowed_el_peruano_url(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     return host == "elperuano.pe" or host.endswith(ALLOWED_PDF_HOST_SUFFIX)
+
+
+def _absolute_href(href: str) -> str:
+    href = href.strip()
+    if href.startswith("/dispositivo/") or href.startswith("dispositivo/"):
+        return urljoin(BUSQUEDAS_URL, href)
+    return urljoin(BASE_URL, href)
 
 
 def _card_for(anchor: Tag) -> Tag:
@@ -80,58 +88,6 @@ def _summary_from_card(card: Tag, *, issuer: str | None, heading: str) -> str | 
     return None
 
 
-def parse_daily_html(html: str, *, captured_at: str | None = None) -> list[dict[str, str | None]]:
-    soup = BeautifulSoup(html, "html.parser")
-    captured_at = captured_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    records: dict[str, dict[str, str | None]] = {}
-
-    for anchor in soup.find_all("a", href=True):
-        href = str(anchor.get("href", "")).strip()
-        match = DEVICE_RE.search(urlparse(urljoin(BASE_URL, href)).path)
-        if not match:
-            continue
-
-        op = match.group("op")
-        heading = anchor.get_text(" ", strip=True)
-        if not heading:
-            continue
-
-        card = _card_for(anchor)
-        card_text = card.get_text("\n", strip=True)
-        date_match = DATE_RE.search(card_text)
-        if not date_match:
-            continue
-
-        number_match = NUMBER_RE.match(heading)
-        document_type = number_match.group("document_type").strip() if number_match else None
-        number = number_match.group("number").strip() if number_match else heading
-        issuer = _issuer_from_card(card, anchor)
-        sumilla = _summary_from_card(card, issuer=issuer, heading=heading)
-        official_url = urljoin("https://busquedas.elperuano.pe", href)
-
-        records[op] = {
-            "id": f"elperuano:{op}",
-            "source": SOURCE,
-            "document_type": document_type,
-            "number": number,
-            "title": sumilla or heading,
-            "summary": None,
-            "publication_date": _iso_date(date_match.group("date")),
-            "effective_date": None,
-            "issuer": issuer,
-            "topic": None,
-            "status": None,
-            "official_url": official_url,
-            "pdf_url": official_url.rstrip("/") + "/pdf",
-            "pdf_path": None,
-            "sha256": None,
-            "captured_at": captured_at,
-            "updated_at": captured_at,
-        }
-
-    return sorted(records.values(), key=lambda item: (item["publication_date"] or "", item["id"] or ""))
-
-
 def _looks_like_pdf_candidate(url: str) -> bool:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
@@ -144,6 +100,82 @@ def _looks_like_pdf_candidate(url: str) -> bool:
         or "descarga" in path
         or "referencias=" in query
     )
+
+
+def _download_link_from_card(card: Tag) -> str | None:
+    for anchor in card.find_all("a", href=True):
+        if anchor.get_text(" ", strip=True).lower() == "descarga individual":
+            return _absolute_href(str(anchor.get("href", "")))
+    return None
+
+
+def parse_daily_html(html: str, *, captured_at: str | None = None) -> list[dict[str, str | None]]:
+    soup = BeautifulSoup(html, "html.parser")
+    captured_at = captured_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    records: dict[str, dict[str, str | None]] = {}
+
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor.get("href", "")).strip()
+        absolute_href = _absolute_href(href)
+        device_match = DEVICE_RE.search(urlparse(absolute_href).path)
+        heading = anchor.get_text(" ", strip=True)
+        number_match = NUMBER_RE.match(heading)
+        direct_document = bool(
+            number_match
+            and _allowed_el_peruano_url(absolute_href)
+            and _looks_like_pdf_candidate(absolute_href)
+        )
+
+        if not device_match and not direct_document:
+            continue
+        if not heading or not number_match:
+            continue
+
+        card = _card_for(anchor)
+        card_text = card.get_text("\n", strip=True)
+        date_match = DATE_RE.search(card_text)
+        if not date_match:
+            continue
+
+        document_type = number_match.group("document_type").strip()
+        number = number_match.group("number").strip()
+        issuer = _issuer_from_card(card, anchor)
+        sumilla = _summary_from_card(card, issuer=issuer, heading=heading)
+
+        if device_match:
+            op = device_match.group("op")
+            record_id = f"elperuano:{op}"
+            official_url = absolute_href
+            fallback_pdf_url = official_url.rstrip("/") + "/pdf"
+        else:
+            fingerprint = hashlib.sha256(absolute_href.encode("utf-8")).hexdigest()[:20]
+            record_id = f"elperuano:direct:{fingerprint}"
+            official_url = absolute_href
+            fallback_pdf_url = absolute_href
+
+        pdf_url = _download_link_from_card(card) or fallback_pdf_url
+
+        records[record_id] = {
+            "id": record_id,
+            "source": SOURCE,
+            "document_type": document_type,
+            "number": number,
+            "title": sumilla or heading,
+            "summary": None,
+            "publication_date": _iso_date(date_match.group("date")),
+            "effective_date": None,
+            "issuer": issuer,
+            "topic": None,
+            "status": None,
+            "official_url": official_url,
+            "pdf_url": pdf_url,
+            "pdf_path": None,
+            "sha256": None,
+            "captured_at": captured_at,
+            "updated_at": captured_at,
+        }
+
+    return sorted(records.values(), key=lambda item: (item["publication_date"] or "", item["id"] or ""))
 
 
 def _candidate_pdf_urls(html: str, base_url: str) -> list[str]:
@@ -204,6 +236,11 @@ def _download_if_pdf(session: requests.Session, url: str, destination: Path) -> 
         return response.url, digest.hexdigest()
 
 
+def _storage_key(record_id: object) -> str:
+    key = str(record_id).removeprefix("elperuano:")
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", key).strip("-") or "document"
+
+
 def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
     viewer_url = record.get("pdf_url")
     if not viewer_url:
@@ -211,8 +248,7 @@ def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
 
     publication_date = record.get("publication_date") or "unknown"
     year = publication_date[:4]
-    op = str(record["id"]).split(":", 1)[1]
-    relative_path = Path("pdfs") / "elperuano" / year / f"{op}.pdf"
+    relative_path = Path("pdfs") / "elperuano" / year / f"{_storage_key(record['id'])}.pdf"
     destination = data_dir() / relative_path
 
     direct = _download_if_pdf(session, viewer_url, destination)
@@ -282,7 +318,6 @@ def collect(*, download_pdfs: bool = True, catalog_path: Path = Path("catalog/no
             try:
                 cache_pdf(session, record)
             except requests.RequestException:
-                # El registro sigue siendo útil y conserva el visor oficial aun si el PDF falla.
                 pass
         upsert_norm(record)
 
