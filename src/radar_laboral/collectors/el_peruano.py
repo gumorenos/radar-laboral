@@ -30,6 +30,7 @@ DEVICE_RE = re.compile(r"/dispositivo/NL/(?P<op>[0-9]+-[0-9]+)(?:/)?$", re.I)
 NUMBER_RE = re.compile(r"^(?P<document_type>.+?)\s+N(?:°|º|\.º)\s*(?P<number>.+)$", re.I)
 DATE_RE = re.compile(r"Fecha:\s*(?P<date>\d{2}/\d{2}/\d{4})", re.I)
 URL_RE = re.compile(r"https?://[^\"'<>\s]+", re.I)
+NO_INFORMATION_RE = re.compile(r"no\s+se\s+encontr[oó]\s+informaci[oó]n", re.I)
 
 
 class CollectorError(RuntimeError):
@@ -57,6 +58,11 @@ def _absolute_href(href: str) -> str:
     if href.startswith("/dispositivo/") or href.startswith("dispositivo/"):
         return urljoin(BUSQUEDAS_URL, href)
     return urljoin(BASE_URL, href)
+
+
+def _explicit_no_information(html: str) -> bool:
+    text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+    return bool(NO_INFORMATION_RE.search(text))
 
 
 def _card_for(anchor: Tag) -> Tag:
@@ -385,6 +391,17 @@ def collect(
         response = session.get(DAILY_URL, timeout=30)
         response.raise_for_status()
         records = parse_daily_html(response.text)
+        if not records and _explicit_no_information(response.text):
+            finish_sync_run(
+                run_id,
+                status="success",
+                records_seen=0,
+                relevant_count=0,
+                review_count=0,
+                pdf_count=0,
+                latest_publication_date=None,
+            )
+            return []
         if not records:
             raise CollectorError(
                 "El Peruano no devolvió dispositivos reconocibles; se evita escribir un catálogo vacío."
