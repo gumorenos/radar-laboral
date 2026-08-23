@@ -29,6 +29,10 @@ from radar_laboral.collectors.el_peruano import (
 
 SEARCH_URL = f"{BUSQUEDAS_URL}/"
 PAGE_SIZE = 20
+PUBLICATION_TYPES = (
+    ("NL", "regular"),
+    ("EX", "extraordinary"),
+)
 TOTAL_RE = re.compile(r"(?P<count>[\d.,]+)\s+dispositivos\s+encontrados", re.I)
 DOT_DATE_RE = re.compile(r"\b(?P<day>\d{2})\.(?P<month>\d{2})\.(?P<year>\d{4})\b")
 TRACKED_RELEVANCE = {"relevant", "review"}
@@ -112,6 +116,7 @@ def _heading_and_summary(anchors: list[Tag]) -> tuple[str | None, str | None]:
 def parse_search_html(
     html: str,
     *,
+    edition: str = "regular",
     captured_at: str | None = None,
 ) -> tuple[list[dict[str, str | None]], int | None]:
     soup = BeautifulSoup(html, "html.parser")
@@ -164,6 +169,7 @@ def parse_search_html(
                 "issuer": issuer,
                 "topic": None,
                 "status": None,
+                "edition": edition,
                 "official_url": official_url,
                 "pdf_url": official_url.rstrip("/") + "/pdf",
                 "pdf_path": None,
@@ -177,20 +183,22 @@ def parse_search_html(
     return records, total
 
 
-def _search_params(day: date, start: int) -> dict[str, str | int]:
+def _search_params(day: date, start: int, publication_type: str) -> dict[str, str | int]:
     compact = day.strftime("%Y%m%d")
     return {
         "ci": "ONLY",
         "fechaFin": compact,
         "fechaIni": compact,
         "start": start,
-        "tipoPublicacion": "NL",
+        "tipoPublicacion": publication_type,
     }
 
 
-def fetch_day(
+def fetch_publication_type(
     session: requests.Session,
     day: date,
+    publication_type: str,
+    edition: str,
     *,
     page_delay_seconds: float = 0.25,
 ) -> list[dict[str, str | None]]:
@@ -200,9 +208,13 @@ def fetch_day(
     max_pages = 100
 
     for page_index in range(max_pages):
-        response = session.get(SEARCH_URL, params=_search_params(day, offset), timeout=30)
+        response = session.get(
+            SEARCH_URL,
+            params=_search_params(day, offset, publication_type),
+            timeout=30,
+        )
         response.raise_for_status()
-        page_records, total = parse_search_html(response.text)
+        page_records, total = parse_search_html(response.text, edition=edition)
         if expected_total is None and total is not None:
             expected_total = total
 
@@ -217,8 +229,8 @@ def fetch_day(
             if expected_total is None and page_index == 0:
                 break
             raise HistoricalCollectorError(
-                f"El Peruano informó {expected_total or 'más'} dispositivos para {day.isoformat()}, "
-                f"pero la página desde start={offset} no devolvió registros reconocibles."
+                f"El Peruano informó {expected_total or 'más'} dispositivos {publication_type} "
+                f"para {day.isoformat()}, pero start={offset} no devolvió registros reconocibles."
             )
 
         offset += PAGE_SIZE
@@ -226,16 +238,42 @@ def fetch_day(
             time.sleep(page_delay_seconds)
     else:
         raise HistoricalCollectorError(
-            f"Se alcanzó el límite de paginación para {day.isoformat()} sin completar la búsqueda."
+            f"Se alcanzó el límite de paginación {publication_type} para {day.isoformat()}."
         )
 
     if expected_total is not None and len(records) != expected_total:
         raise HistoricalCollectorError(
-            f"El Peruano informó {expected_total} dispositivos para {day.isoformat()} "
+            f"El Peruano informó {expected_total} dispositivos {publication_type} para {day.isoformat()} "
             f"pero se normalizaron {len(records)}. Se evita aceptar un backfill incompleto."
         )
 
     return sorted(records.values(), key=lambda item: item["id"] or "")
+
+
+def fetch_day(
+    session: requests.Session,
+    day: date,
+    *,
+    page_delay_seconds: float = 0.25,
+) -> list[dict[str, str | None]]:
+    combined: dict[str, dict[str, str | None]] = {}
+    for publication_type, edition in PUBLICATION_TYPES:
+        records = fetch_publication_type(
+            session,
+            day,
+            publication_type,
+            edition,
+            page_delay_seconds=page_delay_seconds,
+        )
+        for record in records:
+            key = str(record["id"])
+            previous = combined.get(key)
+            if previous and previous.get("edition") != record.get("edition"):
+                raise HistoricalCollectorError(
+                    f"El dispositivo {key} aparece en más de una edición para {day.isoformat()}."
+                )
+            combined[key] = record
+    return sorted(combined.values(), key=lambda item: item["id"] or "")
 
 
 def _iter_days(start_date: date, end_date: date):
@@ -334,7 +372,7 @@ def _parse_cli_date(value: str) -> date:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Carga un rango histórico de Normas Legales desde el buscador oficial de El Peruano"
+        description="Carga Normas Legales regulares y extraordinarias desde el buscador oficial de El Peruano"
     )
     parser.add_argument("--from", dest="start_date", type=_parse_cli_date, required=True)
     parser.add_argument("--to", dest="end_date", type=_parse_cli_date, required=True)
