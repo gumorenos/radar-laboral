@@ -170,6 +170,15 @@ def upsert_norm(record: Mapping[str, object]) -> None:
     if classification["topic"]:
         enriched["topic"] = classification["topic"]
 
+    # Collectors pass mutable dictionaries. Keeping the normalized classification
+    # on that object makes the versioned JSONL catalog match the SQLite record.
+    if isinstance(record, dict):
+        record.update({
+            "labor_relevance": enriched["labor_relevance"],
+            "relevance_reason": enriched["relevance_reason"],
+            "topic": enriched.get("topic"),
+        })
+
     values = [enriched.get(column) for column in NORM_COLUMNS]
     placeholders = ", ".join("?" for _ in NORM_COLUMNS)
     columns = ", ".join(NORM_COLUMNS)
