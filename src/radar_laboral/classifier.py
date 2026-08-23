@@ -114,7 +114,9 @@ def classify_labor(record: Mapping[str, object]) -> dict[str, str | None]:
             topics.append(topic)
 
     if topics:
-        score += min(6, 3 * len(topics))
+        # Una materia laboral específica basta para considerar el documento relevante.
+        # Varias coincidencias refuerzan la señal, pero el score queda acotado.
+        score += min(8, 4 * len(topics))
         reasons.append("materia laboral específica")
 
     if any(term in haystack for term in GENERIC_LABOR_TERMS):
