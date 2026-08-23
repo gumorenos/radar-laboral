@@ -8,7 +8,7 @@ from pathlib import Path
 from flask import Flask, abort, redirect, render_template, request, send_file
 from waitress import serve
 
-from .db import data_dir, init_db, list_sources, search_norms
+from .db import data_dir, get_norm, init_db, list_sources, search_norms
 
 
 def create_app() -> Flask:
@@ -30,8 +30,7 @@ def create_app() -> Flask:
 
     @app.get("/norm/<norm_id>/pdf")
     def norm_pdf(norm_id: str):
-        rows = search_norms(query=norm_id, limit=20)
-        row = next((item for item in rows if item["id"] == norm_id), None)
+        row = get_norm(norm_id)
         if row is None:
             abort(404)
 
