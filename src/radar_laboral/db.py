@@ -33,6 +33,66 @@ CREATE INDEX IF NOT EXISTS idx_norms_source
     ON norms(source);
 CREATE INDEX IF NOT EXISTS idx_norms_topic
     ON norms(topic);
+
+CREATE TABLE IF NOT EXISTS case_law (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    court TEXT NOT NULL,
+    document_type TEXT,
+    number TEXT,
+    docket_number TEXT,
+    title TEXT NOT NULL,
+    summary TEXT,
+    decision_date TEXT,
+    publication_date TEXT,
+    topic TEXT,
+    binding_level TEXT,
+    official_url TEXT NOT NULL,
+    pdf_url TEXT,
+    pdf_path TEXT,
+    sha256 TEXT,
+    captured_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_case_law_decision_date
+    ON case_law(decision_date DESC);
+CREATE INDEX IF NOT EXISTS idx_case_law_number
+    ON case_law(number);
+CREATE INDEX IF NOT EXISTS idx_case_law_court
+    ON case_law(court);
+CREATE INDEX IF NOT EXISTS idx_case_law_topic
+    ON case_law(topic);
+
+CREATE TABLE IF NOT EXISTS concepts (
+    slug TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    summary TEXT,
+    topic TEXT,
+    content_path TEXT NOT NULL,
+    last_reviewed_at TEXT,
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_concepts_topic
+    ON concepts(topic);
+
+CREATE TABLE IF NOT EXISTS document_relations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_kind TEXT NOT NULL,
+    from_id TEXT NOT NULL,
+    to_kind TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT,
+    UNIQUE(from_kind, from_id, to_kind, to_id, relation_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_relations_from
+    ON document_relations(from_kind, from_id);
+CREATE INDEX IF NOT EXISTS idx_document_relations_to
+    ON document_relations(to_kind, to_id);
 """
 
 
