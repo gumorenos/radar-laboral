@@ -31,7 +31,6 @@ SEARCH_URL = f"{BUSQUEDAS_URL}/"
 PAGE_SIZE = 20
 TOTAL_RE = re.compile(r"(?P<count>[\d.,]+)\s+dispositivos\s+encontrados", re.I)
 DOT_DATE_RE = re.compile(r"\b(?P<day>\d{2})\.(?P<month>\d{2})\.(?P<year>\d{4})\b")
-OP_RE = re.compile(r"\b(?P<op>\d{6,}-\d+)\b")
 TRACKED_RELEVANCE = {"relevant", "review"}
 
 
@@ -80,18 +79,34 @@ def _issuer_from_context(context: Tag, heading: str, op: str) -> str | None:
     return None
 
 
-def _summary_for_device(anchors: list[Tag], heading: str) -> str | None:
-    candidates: list[str] = []
+def _anchor_texts(anchors: list[Tag]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
     for anchor in anchors:
         text = anchor.get_text(" ", strip=True)
-        if not text or text == heading or NUMBER_RE.match(text):
+        if not text or text.lower() in {"pdf", "html", "cuadernillo"}:
             continue
-        if text.lower() in {"pdf", "html", "cuadernillo"}:
-            continue
-        candidates.append(text)
-    if not candidates:
-        return None
-    return max(candidates, key=len)
+        if text not in seen:
+            seen.add(text)
+            unique.append(text)
+    return unique
+
+
+def _heading_and_summary(anchors: list[Tag]) -> tuple[str | None, str | None]:
+    texts = _anchor_texts(anchors)
+    if not texts:
+        return None, None
+
+    numbered = next((text for text in texts if NUMBER_RE.match(text)), None)
+    if numbered:
+        alternatives = [text for text in texts if text != numbered]
+        summary = max(alternatives, key=len) if alternatives else None
+        return numbered, summary
+
+    heading = min(texts, key=len)
+    alternatives = [text for text in texts if text != heading]
+    summary = max(alternatives, key=len) if alternatives else None
+    return heading, summary
 
 
 def parse_search_html(
@@ -120,14 +135,7 @@ def parse_search_html(
     records: list[dict[str, str | None]] = []
     for op, group in groups.items():
         anchors = list(group["anchors"])
-        heading = next(
-            (
-                anchor.get_text(" ", strip=True)
-                for anchor in anchors
-                if NUMBER_RE.match(anchor.get_text(" ", strip=True))
-            ),
-            None,
-        )
+        heading, summary = _heading_and_summary(anchors)
         if not heading:
             continue
 
@@ -139,18 +147,16 @@ def parse_search_html(
             continue
 
         number_match = NUMBER_RE.match(heading)
-        if not number_match:
-            continue
-
-        summary = _summary_for_device(anchors, heading)
+        document_type = number_match.group("document_type").strip() if number_match else heading
+        number = number_match.group("number").strip() if number_match else None
         issuer = _issuer_from_context(context, heading, op)
         official_url = str(group["url"])
         records.append(
             {
                 "id": f"elperuano:{op}",
                 "source": SOURCE,
-                "document_type": number_match.group("document_type").strip(),
-                "number": number_match.group("number").strip(),
+                "document_type": document_type,
+                "number": number,
                 "title": summary or heading,
                 "summary": None,
                 "publication_date": _iso_dot_date(date_match),
@@ -264,7 +270,7 @@ def backfill(
 
     accumulated: list[dict[str, object]] = []
     try:
-        for index, day in enumerate(_iter_days(start_date, end_date)):
+        for day in _iter_days(start_date, end_date):
             raw_records = fetch_day(
                 session,
                 day,
@@ -288,12 +294,8 @@ def backfill(
             if day_delay_seconds > 0 and day < end_date:
                 time.sleep(day_delay_seconds)
 
-        relevant_count = sum(
-            1 for item in accumulated if item.get("labor_relevance") == "relevant"
-        )
-        review_count = sum(
-            1 for item in accumulated if item.get("labor_relevance") == "review"
-        )
+        relevant_count = sum(1 for item in accumulated if item.get("labor_relevance") == "relevant")
+        review_count = sum(1 for item in accumulated if item.get("labor_relevance") == "review")
         pdf_count = sum(1 for item in accumulated if item.get("pdf_path"))
         finish_sync_run(
             run_id,
@@ -306,12 +308,8 @@ def backfill(
         )
         return accumulated
     except Exception as exc:
-        relevant_count = sum(
-            1 for item in accumulated if item.get("labor_relevance") == "relevant"
-        )
-        review_count = sum(
-            1 for item in accumulated if item.get("labor_relevance") == "review"
-        )
+        relevant_count = sum(1 for item in accumulated if item.get("labor_relevance") == "relevant")
+        review_count = sum(1 for item in accumulated if item.get("labor_relevance") == "review")
         pdf_count = sum(1 for item in accumulated if item.get("pdf_path"))
         finish_sync_run(
             run_id,
