@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup, Tag
 
 from radar_laboral.db import (
     data_dir,
+    enrich_norm,
     finish_sync_run,
     get_norm,
     init_db,
@@ -30,6 +31,7 @@ DEVICE_RE = re.compile(r"/dispositivo/NL/(?P<op>[0-9]+-[0-9]+)(?:/)?$", re.I)
 NUMBER_RE = re.compile(r"^(?P<document_type>.+?)\s+N(?:°|º|\.º)\s*(?P<number>.+)$", re.I)
 DATE_RE = re.compile(r"Fecha:\s*(?P<date>\d{2}/\d{2}/\d{4})", re.I)
 URL_RE = re.compile(r"https?://[^\"'<>\s]+", re.I)
+TRACKED_RELEVANCE = {"relevant", "review"}
 
 
 class CollectorError(RuntimeError):
@@ -143,7 +145,7 @@ def parse_daily_html(html: str, *, captured_at: str | None = None) -> list[dict[
 
         if not device_match and not direct_document:
             continue
-        if not heading or not number_match:
+        if not heading:
             continue
 
         card = _card_for(anchor)
@@ -152,8 +154,8 @@ def parse_daily_html(html: str, *, captured_at: str | None = None) -> list[dict[
         if not date_match:
             continue
 
-        document_type = number_match.group("document_type").strip()
-        number = number_match.group("number").strip()
+        document_type = number_match.group("document_type").strip() if number_match else heading
+        number = number_match.group("number").strip() if number_match else None
         issuer = _issuer_from_card(card, anchor)
         sumilla = _summary_from_card(card, issuer=issuer, heading=heading)
 
@@ -273,7 +275,7 @@ def _storage_key(record_id: object) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", key).strip("-") or "document"
 
 
-def _restore_cached_pdf(record: dict[str, str | None], destination: Path, relative_path: Path) -> bool:
+def _restore_cached_pdf(record: dict[str, object], destination: Path, relative_path: Path) -> bool:
     existing = get_norm(str(record["id"]))
     if existing is not None and existing["pdf_path"]:
         stored_path = Path(existing["pdf_path"])
@@ -302,12 +304,13 @@ def _restore_cached_pdf(record: dict[str, str | None], destination: Path, relati
     return False
 
 
-def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
+def cache_pdf(session: requests.Session, record: dict[str, object]) -> None:
     viewer_url = record.get("pdf_url")
     if not viewer_url:
         return
+    viewer_url = str(viewer_url)
 
-    publication_date = record.get("publication_date") or "unknown"
+    publication_date = str(record.get("publication_date") or "unknown")
     year = publication_date[:4]
     relative_path = Path("pdfs") / "elperuano" / year / f"{_storage_key(record['id'])}.pdf"
     destination = data_dir() / relative_path
@@ -392,12 +395,13 @@ def collect(
 
         enriched_records: list[dict[str, object]] = []
         for record in records:
-            if download_pdfs:
+            enriched = enrich_norm(record)
+            if download_pdfs and enriched.get("labor_relevance") in TRACKED_RELEVANCE:
                 try:
-                    cache_pdf(session, record)
+                    cache_pdf(session, enriched)
                 except requests.RequestException:
                     pass
-            enriched_records.append(upsert_norm(record))
+            enriched_records.append(upsert_norm(enriched))
 
         merge_catalog(enriched_records, catalog_path)
         relevant_count = sum(
