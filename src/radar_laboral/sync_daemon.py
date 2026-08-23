@@ -5,7 +5,7 @@ import logging
 import os
 import time
 
-from .collectors.el_peruano import collect
+from .collectors.el_peruano_search import collect
 
 DEFAULT_INTERVAL_SECONDS = 6 * 60 * 60
 MIN_INTERVAL_SECONDS = 60 * 60
