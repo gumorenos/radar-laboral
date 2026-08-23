@@ -33,7 +33,7 @@ La primera versión se concentra en normas y cubre:
 4. Colector determinístico de El Peruano.
 5. Clasificación determinística de relevancia laboral.
 6. Sincronización periódica, deduplicación y registro de ejecuciones.
-7. Backfill histórico determinístico por rango de fechas.
+7. Backfill histórico determinístico por rango de fechas, incluyendo ediciones regulares y extraordinarias.
 8. Docker para servidor Linux.
 9. Preparación para empaquetado portable en Windows.
 
@@ -76,7 +76,7 @@ Ejecución manual:
 radar-laboral-sync
 ```
 
-El comando consulta la publicación de Normas Legales, normaliza los dispositivos encontrados, clasifica su relevancia laboral, hace `upsert` en SQLite y actualiza el catálogo JSONL.
+El comando consulta la publicación de Normas Legales, normaliza los dispositivos encontrados, clasifica su relevancia laboral, hace `upsert` en SQLite y actualiza el catálogo JSONL. Cuando la publicación identifica una edición extraordinaria, el registro conserva esa condición explícitamente.
 
 El inventario conserva todos los dispositivos detectados. Para evitar convertir la instalación en un archivo masivo de documentos no laborales, la copia PDF local se descarga solo para registros clasificados como `Relevante` o `Revisar`. Cada PDF local conserva SHA-256 y se vuelve a obtener desde la fuente oficial si su contenido deja de coincidir con el hash registrado.
 
@@ -96,7 +96,14 @@ Por defecto sincroniza cada 6 horas. Puede cambiarse con `RADAR_SYNC_INTERVAL_SE
 
 ## Carga histórica
 
-El buscador oficial de El Peruano permite consultar dispositivos de Normas Legales por fecha. Radar Laboral usa ese mecanismo para reconstruir el histórico día por día y verificar que la cantidad de registros normalizados coincida con el total informado por la fuente.
+El buscador oficial de El Peruano permite consultar dispositivos por fecha y separa dos publicaciones que Radar Laboral considera parte del histórico normativo:
+
+- `NL`: Normas Legales, edición regular;
+- `EX`: Edición Extraordinaria.
+
+No se incorpora el Boletín Oficial dentro de este colector.
+
+Radar Laboral consulta ambas ediciones **día por día y por separado**, pagina cada resultado y valida que la cantidad de dispositivos normalizados coincida exactamente con el total informado por El Peruano para cada tipo de publicación.
 
 Ejemplo, primero solo metadatos:
 
@@ -113,14 +120,18 @@ radar-laboral-backfill --from 2026-01-01 --to 2026-01-31
 El backfill:
 
 - consulta un día por vez;
-- pagina los resultados del buscador oficial;
+- consulta tanto la edición regular como la extraordinaria;
+- pagina los resultados oficiales en bloques de 20;
 - deduplica por Orden de Publicación (OP);
+- conserva la edición (`regular` / `extraordinary`) en cada registro;
 - conserva también dispositivos oficiales sin número;
 - aborta si El Peruano declara más dispositivos de los que el parser logró normalizar;
 - hace `upsert`, por lo que repetir un rango no duplica registros;
 - descarga PDF únicamente para `Relevante` y `Revisar` salvo que se use `--no-pdf`.
 
 Para históricos grandes conviene ejecutarlo por meses o trimestres. Así es más sencillo revisar falsos positivos, reanudar un rango y controlar el crecimiento de `storage/`.
+
+Como prueba de integración conocida, la consulta oficial del **1 de agosto de 2026** informa 124 dispositivos de Normas Legales y 16 de Edición Extraordinaria: un backfill íntegro de ese día debe obtener **140 dispositivos** antes de aplicar filtros de relevancia.
 
 ## Docker
 
@@ -182,4 +193,4 @@ Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación. Los PDF
 
 ## Estado del proyecto
 
-Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, colector de El Peruano, clasificación laboral, cache verificable de PDFs, sincronización automática, backfill histórico y estructura futura para jurisprudencia y conceptos laborales. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
+Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, colector de El Peruano, clasificación laboral, cache verificable de PDFs, sincronización automática, backfill histórico de ediciones regulares y extraordinarias, y estructura futura para jurisprudencia y conceptos laborales. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
