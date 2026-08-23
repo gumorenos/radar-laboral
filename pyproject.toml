@@ -22,6 +22,7 @@ release = ["pyinstaller>=6,<7"]
 radar-laboral = "radar_laboral.app:main"
 radar-laboral-sync = "radar_laboral.collectors.el_peruano:main"
 radar-laboral-sync-daemon = "radar_laboral.sync_daemon:main"
+radar-laboral-backfill = "radar_laboral.collectors.el_peruano_history:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
