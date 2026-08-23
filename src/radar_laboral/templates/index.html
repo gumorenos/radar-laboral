@@ -33,7 +33,7 @@
   <div class="header">
     <div>
       <h1>Radar Laboral Perú</h1>
-      <p class="sub">Repositorio local y consultable de normativa laboral peruana.</p>
+      <p class="sub">Repositorio local y consultable de normativa laboral peruana. La vista principal muestra solo documentos clasificados como laborales relevantes.</p>
     </div>
     <a href="/status">Estado de sincronización →</a>
   </div>
@@ -47,11 +47,11 @@
       {% endfor %}
     </select>
     <select name="relevance">
+      <option value="relevant" {% if relevance == 'relevant' %}selected{% endif %}>Solo laborales relevantes</option>
+      <option value="review" {% if relevance == 'review' %}selected{% endif %}>Pendientes de revisar</option>
       <option value="tracked" {% if relevance == 'tracked' %}selected{% endif %}>Relevantes + revisar</option>
-      <option value="relevant" {% if relevance == 'relevant' %}selected{% endif %}>Solo relevantes</option>
-      <option value="review" {% if relevance == 'review' %}selected{% endif %}>Solo revisar</option>
-      <option value="not_labor" {% if relevance == 'not_labor' %}selected{% endif %}>No laborales</option>
-      <option value="all" {% if relevance == 'all' %}selected{% endif %}>Todos</option>
+      <option value="not_labor" {% if relevance == 'not_labor' %}selected{% endif %}>Descartados / no laborales</option>
+      <option value="all" {% if relevance == 'all' %}selected{% endif %}>Inventario completo</option>
     </select>
     <button type="submit">Buscar</button>
   </form>
@@ -86,7 +86,7 @@
         </tbody>
       </table>
     {% else %}
-      <div class="empty">No hay registros para este filtro. Ejecuta la sincronización o cambia los criterios de búsqueda.</div>
+      <div class="empty">No hay normas laborales relevantes para este filtro. Puedes consultar los pendientes de revisión o el inventario completo desde el selector.</div>
     {% endif %}
   </div>
 </main>
