@@ -4,6 +4,8 @@ import re
 import unicodedata
 from collections.abc import Mapping
 
+CLASSIFIER_VERSION = 2
+
 
 def _normalize(value: object | None) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
@@ -101,7 +103,7 @@ GENERAL_SCOPE_TYPES = (
 )
 
 
-def classify_labor(record: Mapping[str, object]) -> dict[str, str | None]:
+def classify_labor(record: Mapping[str, object]) -> dict[str, str | int | None]:
     title = _normalize(record.get("title"))
     summary = _normalize(record.get("summary"))
     issuer = _normalize(record.get("issuer"))
@@ -130,20 +132,12 @@ def classify_labor(record: Mapping[str, object]) -> dict[str, str | None]:
     if is_general_scope:
         reasons.append("norma de alcance general")
 
-    # Los actos de gestión/personal no forman parte de la biblioteca laboral,
-    # aunque su título mencione empleo, trabajadores o una materia laboral.
     if is_administrative:
         relevance = "not_labor"
-    # Una materia laboral específica sí es suficiente para la biblioteca principal.
     elif topics:
         relevance = "relevant"
-    # Documentos de una autoridad laboral sin materia específica quedan fuera de la
-    # portada, pero se conservan como revisión para evitar falsos negativos.
     elif issuer_is_labor:
         relevance = "review"
-    # Una mención genérica solo merece revisión cuando aparece en una norma de
-    # alcance general; palabras como "trabajadores" o "empleo" por sí solas ya
-    # no convierten cualquier resolución en un documento laboral.
     elif has_generic_labor_term and is_general_scope:
         relevance = "review"
     else:
@@ -158,4 +152,5 @@ def classify_labor(record: Mapping[str, object]) -> dict[str, str | None]:
         "labor_relevance": relevance,
         "topic": ", ".join(topics) if topics else None,
         "relevance_reason": "; ".join(dict.fromkeys(reasons)),
+        "classification_version": CLASSIFIER_VERSION,
     }
