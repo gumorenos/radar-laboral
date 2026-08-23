@@ -93,6 +93,13 @@ GENERIC_LABOR_TERMS = (
     "laboral", "relacion de trabajo", "relaciones laborales",
 )
 
+GENERAL_SCOPE_TYPES = (
+    "ley",
+    "decreto supremo",
+    "decreto legislativo",
+    "decreto de urgencia",
+)
+
 
 def classify_labor(record: Mapping[str, object]) -> dict[str, str | None]:
     title = _normalize(record.get("title"))
@@ -101,45 +108,54 @@ def classify_labor(record: Mapping[str, object]) -> dict[str, str | None]:
     document_type = _normalize(record.get("document_type"))
     haystack = f" {title} {summary} "
 
-    score = 0
-    reasons: list[str] = []
+    issuer_is_labor = any(pattern in issuer for pattern in LABOR_ISSUERS)
+    is_administrative = any(pattern in title for pattern in ADMINISTRATIVE_PATTERNS)
+    has_generic_labor_term = any(term in haystack for term in GENERIC_LABOR_TERMS)
+    is_general_scope = any(kind in document_type for kind in GENERAL_SCOPE_TYPES)
+
     topics: list[str] = []
-
-    if any(pattern in issuer for pattern in LABOR_ISSUERS):
-        score += 2
-        reasons.append("entidad laboral")
-
     for topic, patterns in TOPIC_PATTERNS.items():
         if any(pattern in haystack for pattern in patterns):
             topics.append(topic)
 
+    reasons: list[str] = []
+    if issuer_is_labor:
+        reasons.append("entidad laboral")
     if topics:
-        # Una materia laboral específica basta para considerar el documento relevante.
-        # Varias coincidencias refuerzan la señal, pero el score queda acotado.
-        score += min(8, 4 * len(topics))
         reasons.append("materia laboral específica")
-
-    if any(term in haystack for term in GENERIC_LABOR_TERMS):
-        score += 1
+    if has_generic_labor_term:
         reasons.append("terminología laboral general")
-
-    if any(pattern in title for pattern in ADMINISTRATIVE_PATTERNS):
-        score -= 4
+    if is_administrative:
         reasons.append("acto administrativo de personal/gestión")
-
-    if any(kind in document_type for kind in ("ley", "decreto supremo", "decreto legislativo")) and topics:
-        score += 1
+    if is_general_scope:
         reasons.append("norma de alcance general")
 
-    if score >= 4:
+    # Los actos de gestión/personal no forman parte de la biblioteca laboral,
+    # aunque su título mencione empleo, trabajadores o una materia laboral.
+    if is_administrative:
+        relevance = "not_labor"
+    # Una materia laboral específica sí es suficiente para la biblioteca principal.
+    elif topics:
         relevance = "relevant"
-    elif score >= 1:
+    # Documentos de una autoridad laboral sin materia específica quedan fuera de la
+    # portada, pero se conservan como revisión para evitar falsos negativos.
+    elif issuer_is_labor:
+        relevance = "review"
+    # Una mención genérica solo merece revisión cuando aparece en una norma de
+    # alcance general; palabras como "trabajadores" o "empleo" por sí solas ya
+    # no convierten cualquier resolución en un documento laboral.
+    elif has_generic_labor_term and is_general_scope:
         relevance = "review"
     else:
         relevance = "not_labor"
 
+    if relevance == "not_labor" and not reasons:
+        reasons.append("sin señales laborales suficientes")
+    elif relevance == "not_labor" and has_generic_labor_term and not issuer_is_labor:
+        reasons.append("señal laboral genérica insuficiente")
+
     return {
         "labor_relevance": relevance,
         "topic": ", ".join(topics) if topics else None,
-        "relevance_reason": "; ".join(dict.fromkeys(reasons)) or "sin señales laborales suficientes",
+        "relevance_reason": "; ".join(dict.fromkeys(reasons)),
     }
