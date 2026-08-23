@@ -154,6 +154,7 @@ def parse_daily_html(html: str, *, captured_at: str | None = None) -> list[dict[
         if not date_match:
             continue
 
+        edition = "extraordinary" if "edición extraordinaria" in card_text.casefold() else "regular"
         document_type = number_match.group("document_type").strip() if number_match else heading
         number = number_match.group("number").strip() if number_match else None
         issuer = _issuer_from_card(card, anchor)
@@ -184,6 +185,7 @@ def parse_daily_html(html: str, *, captured_at: str | None = None) -> list[dict[
             "issuer": issuer,
             "topic": None,
             "status": None,
+            "edition": edition,
             "official_url": official_url,
             "pdf_url": pdf_url,
             "pdf_path": None,
