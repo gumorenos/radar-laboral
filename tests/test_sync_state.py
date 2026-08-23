@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 import unittest
@@ -33,6 +34,27 @@ class SyncStateTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.env.stop()
         self.tmp.cleanup()
+
+    def _stored_pdf_record(self, relative: Path, sha256: str) -> dict[str, object]:
+        return {
+            "id": "elperuano:123-1",
+            "source": "El Peruano",
+            "document_type": "DECRETO SUPREMO",
+            "number": "001-2026-TR",
+            "title": "Modifican disposiciones sobre jornada de trabajo",
+            "summary": None,
+            "publication_date": "2026-08-23",
+            "effective_date": None,
+            "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            "topic": None,
+            "status": None,
+            "official_url": "https://busquedas.elperuano.pe/dispositivo/NL/123-1",
+            "pdf_url": "https://epdoc2.elperuano.pe/test.pdf",
+            "pdf_path": relative.as_posix(),
+            "sha256": sha256,
+            "captured_at": "2026-08-23T05:00:00+00:00",
+            "updated_at": "2026-08-23T05:00:00+00:00",
+        }
 
     def test_sync_run_and_stats(self) -> None:
         record = {
@@ -82,27 +104,11 @@ class SyncStateTests(unittest.TestCase):
         relative = Path("pdfs/elperuano/2026/123-1.pdf")
         pdf = data_dir() / relative
         pdf.parent.mkdir(parents=True, exist_ok=True)
-        pdf.write_bytes(b"%PDF-1.4\nradar laboral\n%%EOF\n")
+        payload = b"%PDF-1.4\nradar laboral\n%%EOF\n"
+        pdf.write_bytes(payload)
+        expected_hash = hashlib.sha256(payload).hexdigest()
 
-        stored = {
-            "id": "elperuano:123-1",
-            "source": "El Peruano",
-            "document_type": "DECRETO SUPREMO",
-            "number": "001-2026-TR",
-            "title": "Modifican disposiciones sobre jornada de trabajo",
-            "summary": None,
-            "publication_date": "2026-08-23",
-            "effective_date": None,
-            "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
-            "topic": None,
-            "status": None,
-            "official_url": "https://busquedas.elperuano.pe/dispositivo/NL/123-1",
-            "pdf_url": "https://epdoc2.elperuano.pe/test.pdf",
-            "pdf_path": relative.as_posix(),
-            "sha256": "stored-hash",
-            "captured_at": "2026-08-23T05:00:00+00:00",
-            "updated_at": "2026-08-23T05:00:00+00:00",
-        }
+        stored = self._stored_pdf_record(relative, expected_hash)
         upsert_norm(stored)
 
         incoming = dict(stored)
@@ -113,7 +119,26 @@ class SyncStateTests(unittest.TestCase):
         cache_pdf(_FailIfNetworkSession(), incoming)
         self.assertEqual(incoming["pdf_path"], relative.as_posix())
         self.assertEqual(incoming["pdf_url"], "https://epdoc2.elperuano.pe/test.pdf")
-        self.assertEqual(incoming["sha256"], "stored-hash")
+        self.assertEqual(incoming["sha256"], expected_hash)
+
+    def test_hash_mismatch_forces_pdf_refresh(self) -> None:
+        relative = Path("pdfs/elperuano/2026/123-1.pdf")
+        pdf = data_dir() / relative
+        pdf.parent.mkdir(parents=True, exist_ok=True)
+        original = b"%PDF-1.4\noriginal\n%%EOF\n"
+        pdf.write_bytes(original)
+        expected_hash = hashlib.sha256(original).hexdigest()
+        stored = self._stored_pdf_record(relative, expected_hash)
+        upsert_norm(stored)
+
+        pdf.write_bytes(b"%PDF-1.4\nmodified\n%%EOF\n")
+        incoming = dict(stored)
+        incoming["pdf_path"] = None
+        incoming["sha256"] = None
+
+        with self.assertRaises(AssertionError):
+            cache_pdf(_FailIfNetworkSession(), incoming)
+        self.assertFalse(pdf.exists())
 
     def test_runtime_catalog_path_can_live_in_persistent_storage(self) -> None:
         expected = Path(self.tmp.name) / "catalog" / "norms.jsonl"
