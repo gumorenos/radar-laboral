@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
+from typing import Mapping
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS norms (
@@ -95,6 +96,26 @@ CREATE INDEX IF NOT EXISTS idx_document_relations_to
     ON document_relations(to_kind, to_id);
 """
 
+NORM_COLUMNS = (
+    "id",
+    "source",
+    "document_type",
+    "number",
+    "title",
+    "summary",
+    "publication_date",
+    "effective_date",
+    "issuer",
+    "topic",
+    "status",
+    "official_url",
+    "pdf_url",
+    "pdf_path",
+    "sha256",
+    "captured_at",
+    "updated_at",
+)
+
 
 def data_dir() -> Path:
     path = Path(os.getenv("RADAR_DATA_DIR", "storage")).expanduser().resolve()
@@ -116,6 +137,34 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+
+
+def upsert_norm(record: Mapping[str, object]) -> None:
+    values = [record.get(column) for column in NORM_COLUMNS]
+    placeholders = ", ".join("?" for _ in NORM_COLUMNS)
+    columns = ", ".join(NORM_COLUMNS)
+    sql = f"""
+        INSERT INTO norms ({columns})
+        VALUES ({placeholders})
+        ON CONFLICT(id) DO UPDATE SET
+            source = excluded.source,
+            document_type = COALESCE(excluded.document_type, norms.document_type),
+            number = COALESCE(excluded.number, norms.number),
+            title = excluded.title,
+            summary = COALESCE(excluded.summary, norms.summary),
+            publication_date = COALESCE(excluded.publication_date, norms.publication_date),
+            effective_date = COALESCE(excluded.effective_date, norms.effective_date),
+            issuer = COALESCE(excluded.issuer, norms.issuer),
+            topic = COALESCE(excluded.topic, norms.topic),
+            status = COALESCE(excluded.status, norms.status),
+            official_url = excluded.official_url,
+            pdf_url = COALESCE(excluded.pdf_url, norms.pdf_url),
+            pdf_path = COALESCE(excluded.pdf_path, norms.pdf_path),
+            sha256 = COALESCE(excluded.sha256, norms.sha256),
+            updated_at = COALESCE(excluded.updated_at, norms.updated_at)
+    """
+    with connect() as conn:
+        conn.execute(sql, values)
 
 
 def get_norm(norm_id: str):
