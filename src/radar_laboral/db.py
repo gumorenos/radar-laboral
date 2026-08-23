@@ -38,8 +38,6 @@ CREATE INDEX IF NOT EXISTS idx_norms_source
     ON norms(source);
 CREATE INDEX IF NOT EXISTS idx_norms_topic
     ON norms(topic);
-CREATE INDEX IF NOT EXISTS idx_norms_labor_relevance
-    ON norms(labor_relevance);
 
 CREATE TABLE IF NOT EXISTS case_law (
     id TEXT PRIMARY KEY,
@@ -156,10 +154,38 @@ def _ensure_norm_columns(conn: sqlite3.Connection) -> None:
     )
 
 
+def _backfill_norm_classification(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT id, source, document_type, number, title, summary, issuer, topic
+        FROM norms
+        WHERE labor_relevance IS NULL OR relevance_reason IS NULL
+        """
+    ).fetchall()
+    for row in rows:
+        classification = classify_labor(dict(row))
+        conn.execute(
+            """
+            UPDATE norms
+            SET labor_relevance = ?,
+                relevance_reason = ?,
+                topic = COALESCE(?, topic)
+            WHERE id = ?
+            """,
+            (
+                classification["labor_relevance"],
+                classification["relevance_reason"],
+                classification["topic"],
+                row["id"],
+            ),
+        )
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
         _ensure_norm_columns(conn)
+        _backfill_norm_classification(conn)
 
 
 def upsert_norm(record: Mapping[str, object]) -> None:
@@ -170,8 +196,6 @@ def upsert_norm(record: Mapping[str, object]) -> None:
     if classification["topic"]:
         enriched["topic"] = classification["topic"]
 
-    # Collectors pass mutable dictionaries. Keeping the normalized classification
-    # on that object makes the versioned JSONL catalog match the SQLite record.
     if isinstance(record, dict):
         record.update({
             "labor_relevance": enriched["labor_relevance"],
