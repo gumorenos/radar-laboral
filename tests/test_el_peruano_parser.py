@@ -35,6 +35,21 @@ UNNUMBERED_HTML = """
 </div>
 """
 
+EXTRAORDINARY_HTML = """
+<div class="norma extraordinaria">
+  <div>Edición Extraordinaria</div>
+  <h4>TRABAJO Y PROMOCIÓN DEL EMPLEO</h4>
+  <h5>
+    <a href="https://busquedas.elperuano.pe/dispositivo/NL/2539400-1">
+      DECRETO SUPREMO N° 010-2026-TR
+    </a>
+  </h5>
+  <div>Fecha: 01/08/2026</div>
+  <p>Aprueban medidas extraordinarias en materia laboral</p>
+  <a href="/dispositivo/NL/2539400-1/pdf">Descarga individual</a>
+</div>
+"""
+
 
 class ElPeruanoParserTests(unittest.TestCase):
     def test_parses_daily_device(self) -> None:
@@ -51,6 +66,7 @@ class ElPeruanoParserTests(unittest.TestCase):
         self.assertEqual(record["document_type"], "RESOLUCIÓN MINISTERIAL")
         self.assertEqual(record["number"], "251-2026-TR")
         self.assertEqual(record["publication_date"], "2026-08-22")
+        self.assertEqual(record["edition"], "regular")
         self.assertTrue(str(record["title"]).startswith("Designan Asesor"))
         self.assertEqual(
             record["official_url"],
@@ -72,7 +88,17 @@ class ElPeruanoParserTests(unittest.TestCase):
         self.assertEqual(record["document_type"], "ACUERDO del Pleno")
         self.assertIsNone(record["number"])
         self.assertEqual(record["issuer"], "JURADO NACIONAL DE ELECCIONES")
+        self.assertEqual(record["edition"], "regular")
         self.assertTrue(str(record["title"]).startswith("Modifican el cronograma"))
+
+    def test_marks_extraordinary_edition(self) -> None:
+        records = parse_daily_html(
+            EXTRAORDINARY_HTML,
+            captured_at="2026-08-23T00:00:00+00:00",
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["edition"], "extraordinary")
+        self.assertEqual(records[0]["number"], "010-2026-TR")
 
 
 if __name__ == "__main__":
