@@ -19,12 +19,14 @@ def create_app() -> Flask:
     def index():
         query = request.args.get("q", "").strip()
         source = request.args.get("source", "").strip()
-        rows = search_norms(query=query, source=source)
+        relevance = request.args.get("relevance", "tracked").strip()
+        rows = search_norms(query=query, source=source, relevance=relevance)
         return render_template(
             "index.html",
             rows=rows,
             query=query,
             source=source,
+            relevance=relevance,
             sources=list_sources(),
         )
 
