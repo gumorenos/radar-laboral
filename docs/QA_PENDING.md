@@ -1,15 +1,22 @@
 # QA pendiente / ejecución en infraestructura
 
-Este archivo registra pruebas que requieren la Raspberry Pi, acceso de red real a las fuentes oficiales o el despliegue con Cloudflare. No sustituye las pruebas automatizadas de CI.
+Este archivo registra pruebas que requieren la Raspberry Pi, el despliegue con Cloudflare o verificación de archivos persistentes/PDF reales. No sustituye las pruebas automatizadas de CI.
 
-## Estado de referencia
+## QA ya completado desde desarrollo
 
-- `main` desplegado y verificado antes de este cambio: `5b2f9861bebc3411862e9bd8d7ef26a1c25a5b12`.
-- El sincronizador diario ya usa el buscador oficial de El Peruano por fecha (`NL` + `EX`).
-- Validaciones manuales ya realizadas desde la Raspberry:
-  - 2026-07-29 `NL`: HTTP 200, `13 dispositivos encontrados`, 13 OP detectados.
-  - 2026-08-23 `NL`: HTTP 200, 0 OP y `No hay resultados para mostrar`.
-- Este branch añade el backfill histórico reutilizando exactamente el mismo parser y las mismas validaciones del collector diario.
+- `main` desplegado antes de este cambio: `5b2f9861bebc3411862e9bd8d7ef26a1c25a5b12`.
+- El collector diario ya usa el buscador oficial de El Peruano por fecha (`NL` + `EX`).
+- Validación web oficial del **2026-08-01**:
+  - `NL`: 124 dispositivos;
+  - `EX`: 16 dispositivos;
+  - total: 140.
+- Integración live ejecutada en GitHub Actions contra El Peruano real, run `32687133889`:
+  - `radar-laboral-backfill --from 2026-08-01 --to 2026-08-01 --no-pdf` terminó con 140 registros;
+  - SQLite quedó con 124 `edition=regular` y 16 `edition=extraordinary`;
+  - `sync_runs` registró `success`, `records_seen=140`;
+  - una consulta futura sin resultados (`2026-12-31`) se registró como `success`, `records_seen=0`.
+- El workflow live fue temporal y se eliminó después del gate para que el CI normal no dependa de una fuente externa.
+- Importante: el 2026-08-23 aparecía vacío durante la madrugada, pero más tarde El Peruano publicó 37 dispositivos. No usar una fecha de publicación en curso como fixture permanente de "día vacío".
 
 ## 1. Despliegue del commit aprobado
 
@@ -24,44 +31,31 @@ docker compose ps
 
 Criterios de aceptación:
 
-- `radar-laboral` aparece `healthy`.
-- `radar-laboral-sync` aparece `Up` y no hereda el healthcheck HTTP del servidor web.
+- `radar-laboral` aparece `healthy`;
+- `radar-laboral-sync` aparece `Up` y no hereda el healthcheck HTTP del servidor web;
 - no se pierde `storage/radar_laboral.db`, `storage/catalog/` ni `storage/pdfs/`.
 
-## 2. Día sin publicaciones
-
-Verifica que un día oficialmente vacío sea éxito y no un falso fallo del parser:
+## 2. Smoke del sincronizador diario en Raspberry
 
 ```bash
-docker compose run --rm radar-laboral \
-  radar-laboral-sync --date 2026-08-23 --no-pdf
+docker compose run --rm radar-laboral radar-laboral-sync --no-pdf
 ```
 
-Esperado:
+No fijar un número esperado para la fecha en curso. El criterio es:
 
-```text
-El Peruano: 0 registros; 0 relevantes; 0 por revisar; 0 PDF almacenados.
-```
-
-Después:
+- termina sin excepción;
+- respeta la fecha local de Lima;
+- si El Peruano informa un total, la cantidad normalizada coincide;
+- si El Peruano devuelve explícitamente `No hay resultados para mostrar`, termina como éxito con 0;
+- `/api/status` registra la ejecución como `success`.
 
 ```bash
 curl -s http://127.0.0.1:8080/api/status | python -m json.tool
 ```
 
-Criterio: la última ejecución correspondiente debe quedar `success`, no `failed`.
+## 3. Repetición opcional del gate histórico en Raspberry
 
-## 3. Gate de integración del backfill histórico
-
-Fecha conocida: **2026-08-01**.
-
-El buscador oficial informó previamente:
-
-- `NL`: 124 dispositivos.
-- `EX`: 16 dispositivos.
-- total esperado: **140 dispositivos**.
-
-Ejecutar primero sin PDF:
+El gate ya pasó contra la fuente real desde GitHub Actions. Para confirmar además el entorno ARM/Docker de la Raspberry:
 
 ```bash
 docker compose run --rm radar-laboral \
@@ -71,11 +65,11 @@ docker compose run --rm radar-laboral \
   --no-pdf
 ```
 
-Criterio de aceptación: el comando termina sin excepción de integridad y reporta **140 registros** antes de considerar su clasificación laboral.
+Criterio: **140 registros** = 124 `NL` + 16 `EX`.
 
-Si El Peruano cambia retrospectivamente el histórico y el total oficial deja de ser 140, documentar la nueva cifra y conservar evidencia del resultado antes de modificar este gate.
+Si El Peruano cambia retrospectivamente el histórico y el total oficial deja de ser 140, documentar la nueva cifra y conservar evidencia antes de modificar este gate.
 
-## 4. Idempotencia real
+## 4. Idempotencia real sobre el volumen persistente
 
 Repetir exactamente el comando anterior una segunda vez.
 
@@ -86,21 +80,11 @@ Criterios:
 - el catálogo JSONL sigue teniendo una sola entrada por `id`;
 - `sync_runs` registra una nueva ejecución independiente.
 
-## 5. Ediciones regular y extraordinaria
+La misma propiedad ya está cubierta con pruebas automatizadas sobre SQLite temporal; esta prueba confirma el volumen persistente real.
 
-Comprobar en `storage/catalog/norms.jsonl` que los registros del backfill incluyan:
+## 5. Migración y visualización de edición
 
-```json
-{"edition": "regular"}
-```
-
-o:
-
-```json
-{"edition": "extraordinary"}
-```
-
-Comprobar también que la migración añadió `edition` a SQLite y que existen registros extraordinarios cuando la fecha consultada los contiene:
+Comprobar que la base existente recibió `edition` y conserva las ediciones extraordinarias:
 
 ```bash
 docker compose exec -T radar-laboral python - <<'PY'
@@ -119,8 +103,9 @@ PY
 Criterios:
 
 - `edition column: True`;
-- el conteo extraordinario es mayor que cero después de cargar una fecha con edición `EX`;
-- en la interfaz web esos registros muestran la etiqueta **Extraordinaria**.
+- después de cargar 2026-08-01, el conteo extraordinario es al menos 16;
+- `storage/catalog/norms.jsonl` también conserva `regular` / `extraordinary`;
+- la interfaz web muestra la etiqueta **Extraordinaria** en esos registros.
 
 ## 6. PDF real de una norma laboral
 
@@ -161,7 +146,7 @@ docker compose logs --tail=150 radar-laboral-sync
 Criterios:
 
 - la primera sincronización se ejecuta tras el delay configurado;
-- un día vacío se registra como sincronización completada con 0 registros;
+- una respuesta vacía explícita se registra como sincronización completada con 0 registros;
 - un HTML ambiguo o un total oficial que no coincide con los OP normalizados continúa siendo error visible.
 
 ## 9. Limpieza Git local: NO hacer automáticamente
@@ -182,7 +167,7 @@ git branch -vv
 
 Solo eliminar el stash/branch después de confirmar que no contienen ninguna personalización que no esté ya en `main`. No forma parte del despliegue normal.
 
-## 10. Qué hacer ante un fallo
+## 10. Qué guardar ante un fallo
 
 No relajar las validaciones de integridad para hacer pasar el collector. Guardar:
 
