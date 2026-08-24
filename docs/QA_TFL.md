@@ -31,7 +31,7 @@ Gate ejecutado en GitHub Actions temporal el 2026-08-24. Resultado:
 - SHA-256 observado: `8960cfa1817e499775d60d599cc00e941dad879942bfacda186984e1eedef889`;
 - una segunda llamada al cache reutilizó el PDF local sin hacer red.
 
-El workflow temporal de QA live se elimina después de este gate para que el CI normal no dependa de `gob.pe`.
+El workflow temporal de QA live se eliminó después de este gate para que el CI normal no dependa de `gob.pe`. El head final sin ese workflow volvió a pasar unit tests, compilación, validación de Compose y build de contenedor.
 
 No usar 53 como igualdad permanente: nuevas Resoluciones de Sala Plena incrementarán naturalmente el total.
 
