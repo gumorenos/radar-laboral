@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from radar_laboral.app import create_app
@@ -129,6 +130,49 @@ class AppStatusTests(unittest.TestCase):
         self.assertIn(b"Filtros avanzados", response.data)
         self.assertIn(b"activos", response.data)
         self.assertIn(b"Extraordinaria", response.data)
+
+    def test_home_paginates_and_preserves_search_filters(self) -> None:
+        start = date(2026, 1, 1)
+        for index in range(52):
+            publication_date = (start + timedelta(days=index)).isoformat()
+            upsert_norm(
+                _record(
+                    f"page-{index:02d}",
+                    f"Norma paginada {index:02d} sobre teletrabajo",
+                    "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                    "DECRETO SUPREMO",
+                    publication_date=publication_date,
+                    edition="regular",
+                )
+            )
+
+        query = {
+            "q": "teletrabajo",
+            "relevance": "relevant",
+            "edition": "regular",
+        }
+        first = self.client.get("/", query_string=query)
+        self.assertEqual(first.status_code, 200)
+        self.assertIn(b"Norma paginada 51", first.data)
+        self.assertNotIn(b"Norma paginada 01", first.data)
+        self.assertIn(b"Siguiente", first.data)
+        self.assertIn(b"page=2", first.data)
+        self.assertIn(b"edition=regular", first.data)
+        self.assertIn(b"q=teletrabajo", first.data)
+
+        second = self.client.get("/", query_string={**query, "page": "2"})
+        self.assertEqual(second.status_code, 200)
+        self.assertIn(b"Norma paginada 01", second.data)
+        self.assertIn(b"Norma paginada 00", second.data)
+        self.assertNotIn(b"Norma paginada 02", second.data)
+        self.assertIn(b"PÃP\xc3¡P\xc3\xa1gina 2", second.data)
+        self.assertIn(b"Anterior", second.data)
+        self.assertNotIn(b"page=3", second.data)
+
+    def test_invalid_page_falls_back_to_first_page(self) -> None:
+        response = self.client.get("/", query_string={"page": "abc"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"PÃP\xc3¡P\xc3\xa1gina 2", response.data)
 
     def test_status_api_reports_latest_sync(self) -> None:
         run_id = start_sync_run("El Peruano")
