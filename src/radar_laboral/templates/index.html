@@ -9,6 +9,7 @@
     main { max-width: 1280px; margin: 0 auto; padding: 32px 20px; }
     h1 { margin-bottom: 6px; }
     .header { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+    .nav { display: flex; gap: 14px; flex-wrap: wrap; }
     .sub, .muted { color: #666; }
     .sub { margin-top: 0; }
     form { margin: 24px 0; }
@@ -47,7 +48,7 @@
       <h1>Radar Laboral Perú</h1>
       <p class="sub">Repositorio local y consultable de normativa laboral peruana. La vista principal muestra solo documentos clasificados como laborales relevantes.</p>
     </div>
-    <a href="/status">Estado de sincronización →</a>
+    <nav class="nav"><a href="/jurisprudencia">Jurisprudencia</a><a href="/status">Estado de sincronización →</a></nav>
   </div>
 
   {% set advanced_active = filters.source or filters.document_type or filters.issuer or filters.topic or filters.edition or filters.date_from or filters.date_to %}
