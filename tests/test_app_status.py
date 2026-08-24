@@ -44,7 +44,14 @@ def _record(
 class AppStatusTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.env = patch.dict(os.environ, {"RADAR_DATA_DIR": self.tmp.name}, clear=False)
+        self.env = patch.dict(
+            os.environ,
+            {
+                "RADAR_DATA_DIR": self.tmp.name,
+                "RADAR_ADMIN_TOKEN": "",
+            },
+            clear=False,
+        )
         self.env.start()
         self.app = create_app()
         self.app.config.update(TESTING=True)
@@ -59,7 +66,7 @@ class AppStatusTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"status": "ok"})
 
-    def test_home_defaults_to_relevant_labor_norms_only(self) -> None:
+    def test_home_defaults_to_relevant_and_review_records(self) -> None:
         upsert_norm(
             _record(
                 "relevant",
@@ -86,10 +93,24 @@ class AppStatusTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"teletrabajo", response.data)
-        self.assertNotIn(b"lineamientos institucionales", response.data)
+        self.assertIn(b"lineamientos institucionales", response.data)
         self.assertNotIn(b"trabajadores de la entidad", response.data)
-        self.assertIn(b"Solo laborales relevantes", response.data)
+        self.assertIn(b"Laborales + por revisar", response.data)
         self.assertIn(b"Filtros avanzados", response.data)
+        self.assertIn(b"Cobertura:", response.data)
+
+    def test_home_explains_when_inventory_has_no_tracked_records(self) -> None:
+        upsert_norm(
+            _record(
+                "not-labor",
+                "Aprueban medidas internas de la entidad",
+                "OTRA ENTIDAD",
+            )
+        )
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"ninguno est", response.data)
+        self.assertIn(b"Carga un rango hist", response.data)
 
     def test_home_applies_advanced_filters(self) -> None:
         upsert_norm(
@@ -174,7 +195,15 @@ class AppStatusTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("Página 2".encode(), response.data)
 
-    def test_status_api_reports_latest_sync(self) -> None:
+    def test_status_api_reports_latest_sync_and_date_bounds(self) -> None:
+        upsert_norm(
+            _record(
+                "dated",
+                "Regulan teletrabajo",
+                "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                publication_date="2026-07-22",
+            )
+        )
         run_id = start_sync_run("El Peruano")
         finish_sync_run(
             run_id,
@@ -192,12 +221,16 @@ class AppStatusTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["last_sync"]["status"], "success")
         self.assertEqual(payload["last_sync"]["records_seen"], 3)
+        self.assertEqual(payload["date_bounds"]["earliest"], "2026-07-22")
         self.assertIn("stats", payload)
+        self.assertEqual(payload["sync_requests"], [])
 
-    def test_status_page_renders(self) -> None:
+    def test_status_page_renders_historical_selector_state(self) -> None:
         response = self.client.get("/status")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Estado del Radar", response.data)
+        self.assertIn(b"Carga hist", response.data)
+        self.assertIn(b"RADAR_ADMIN_TOKEN", response.data)
 
 
 if __name__ == "__main__":
