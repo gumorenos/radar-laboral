@@ -6,6 +6,11 @@ dist/
 build/
 *.egg-info/
 
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
 # Runtime data: reproducible locally from the catalog and official sources
 storage/*
 !storage/.gitkeep
