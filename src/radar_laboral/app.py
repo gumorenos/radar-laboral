@@ -8,6 +8,11 @@ from pathlib import Path
 from flask import Flask, abort, redirect, render_template, request, send_file, url_for
 from waitress import serve
 
+from .case_law import (
+    get_case_law,
+    list_case_law_filter_options,
+    search_case_law,
+)
 from .db import (
     data_dir,
     get_norm,
@@ -17,7 +22,11 @@ from .db import (
     norm_stats,
     search_norms,
 )
-from .relations import list_related_case_law, list_related_norms
+from .relations import (
+    list_related_case_law,
+    list_related_norms,
+    list_related_norms_for_case_law,
+)
 
 PAGE_SIZE = 50
 MAX_PAGE = 100_000
@@ -38,6 +47,26 @@ def _page_number(value: str) -> int:
         return min(MAX_PAGE, max(1, int(value)))
     except (TypeError, ValueError):
         return 1
+
+
+def _pagination(endpoint: str, page: int, has_next: bool, args: dict[str, str]):
+    clean = {key: value for key, value in args.items() if value}
+    return {
+        "page": page,
+        "has_previous": page > 1,
+        "has_next": has_next,
+        "previous_url": url_for(endpoint, **clean, page=page - 1) if page > 1 else None,
+        "next_url": url_for(endpoint, **clean, page=page + 1) if has_next else None,
+    }
+
+
+def _document_path(value: str | None) -> Path | None:
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = data_dir() / path
+    return path
 
 
 def create_app() -> Flask:
@@ -68,21 +97,6 @@ def create_app() -> Flask:
         )
         has_next = len(fetched) > PAGE_SIZE
         rows = fetched[:PAGE_SIZE]
-
-        base_args = {
-            "q": query,
-            "relevance": relevance,
-            **filters,
-        }
-        base_args = {key: value for key, value in base_args.items() if value}
-        pagination = {
-            "page": page,
-            "has_previous": page > 1,
-            "has_next": has_next,
-            "previous_url": url_for("index", **base_args, page=page - 1) if page > 1 else None,
-            "next_url": url_for("index", **base_args, page=page + 1) if has_next else None,
-        }
-
         return render_template(
             "index.html",
             rows=rows,
@@ -90,7 +104,12 @@ def create_app() -> Flask:
             relevance=relevance,
             filters=filters,
             options=list_norm_filter_options(),
-            pagination=pagination,
+            pagination=_pagination(
+                "index",
+                page,
+                has_next,
+                {"q": query, "relevance": relevance, **filters},
+            ),
         )
 
     @app.get("/norm/<norm_id>")
@@ -111,14 +130,68 @@ def create_app() -> Flask:
         row = get_norm(norm_id)
         if row is None:
             abort(404)
+        path = _document_path(row["pdf_path"])
+        if path and path.exists():
+            return send_file(path, mimetype="application/pdf")
+        if row["pdf_url"]:
+            return redirect(row["pdf_url"])
+        abort(404)
 
-        if row["pdf_path"]:
-            path = Path(row["pdf_path"])
-            if not path.is_absolute():
-                path = data_dir() / path
-            if path.exists():
-                return send_file(path, mimetype="application/pdf")
+    @app.get("/jurisprudencia")
+    def case_law_index():
+        query = request.args.get("q", "").strip()
+        page = _page_number(request.args.get("page", "1"))
+        filters = {
+            "court": request.args.get("court", "").strip(),
+            "document_type": request.args.get("document_type", "").strip(),
+            "topic": request.args.get("topic", "").strip(),
+            "binding_level": request.args.get("binding_level", "").strip(),
+            "date_from": request.args.get("date_from", "").strip(),
+            "date_to": request.args.get("date_to", "").strip(),
+        }
+        offset = (page - 1) * PAGE_SIZE
+        fetched = search_case_law(
+            query,
+            limit=PAGE_SIZE + 1,
+            offset=offset,
+            **filters,
+        )
+        has_next = len(fetched) > PAGE_SIZE
+        rows = fetched[:PAGE_SIZE]
+        return render_template(
+            "case_law_index.html",
+            rows=rows,
+            query=query,
+            filters=filters,
+            options=list_case_law_filter_options(),
+            pagination=_pagination(
+                "case_law_index",
+                page,
+                has_next,
+                {"q": query, **filters},
+            ),
+        )
 
+    @app.get("/jurisprudencia/<case_id>")
+    def case_law_detail(case_id: str):
+        row = get_case_law(case_id)
+        if row is None:
+            abort(404)
+        return render_template(
+            "case_law_detail.html",
+            case=row,
+            related_norms=list_related_norms_for_case_law(case_id),
+            relation_labels=RELATION_LABELS,
+        )
+
+    @app.get("/jurisprudencia/<case_id>/pdf")
+    def case_law_pdf(case_id: str):
+        row = get_case_law(case_id)
+        if row is None:
+            abort(404)
+        path = _document_path(row["pdf_path"])
+        if path and path.exists():
+            return send_file(path, mimetype="application/pdf")
         if row["pdf_url"]:
             return redirect(row["pdf_url"])
         abort(404)
