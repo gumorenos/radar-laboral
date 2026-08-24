@@ -13,7 +13,7 @@ from radar_laboral.collectors.el_peruano_search import (
     fetch_day,
     local_today,
 )
-from radar_laboral.coverage import mark_coverage_day
+from radar_laboral.coverage import complete_coverage_days, mark_coverage_day
 from radar_laboral.db import (
     enrich_norm,
     finish_sync_run,
@@ -40,12 +40,16 @@ def backfill(
     catalog_path: Path | None = None,
     page_delay_seconds: float = 0.25,
     day_delay_seconds: float = 0.5,
+    skip_complete_days: bool = False,
 ) -> list[dict[str, object]]:
     if end_date < start_date:
         raise ValueError("La fecha final no puede ser anterior a la fecha inicial")
 
     catalog_path = catalog_path or default_catalog_path()
     init_db()
+    completed_days = (
+        complete_coverage_days(start_date, end_date) if skip_complete_days else set()
+    )
     run_id = start_sync_run(SOURCE)
     session = requests.Session()
     session.headers.update(
@@ -56,8 +60,15 @@ def backfill(
     )
 
     stored_records: list[dict[str, object]] = []
+    processed_any_day = False
     try:
         for current_day in _iter_days(start_date, end_date):
+            if current_day in completed_days:
+                continue
+
+            if processed_any_day and day_delay_seconds > 0:
+                time.sleep(day_delay_seconds)
+
             raw_records = fetch_day(
                 session,
                 current_day,
@@ -91,9 +102,7 @@ def backfill(
                 ),
                 is_complete=current_day < local_today(),
             )
-
-            if day_delay_seconds > 0 and current_day < end_date:
-                time.sleep(day_delay_seconds)
+            processed_any_day = True
 
         relevant_count = sum(
             1 for item in stored_records if item.get("labor_relevance") == "relevant"
@@ -156,6 +165,11 @@ def main() -> None:
     parser.add_argument("--from", dest="start_date", type=_parse_date, required=True)
     parser.add_argument("--to", dest="end_date", type=_parse_date, required=True)
     parser.add_argument("--no-pdf", action="store_true")
+    parser.add_argument(
+        "--missing-only",
+        action="store_true",
+        help="Omite días históricos que ya figuran como cobertura completa",
+    )
     parser.add_argument("--catalog", type=Path, default=default_catalog_path())
     parser.add_argument("--page-delay", type=float, default=0.25)
     parser.add_argument("--day-delay", type=float, default=0.5)
@@ -168,6 +182,7 @@ def main() -> None:
         catalog_path=args.catalog,
         page_delay_seconds=max(0.0, args.page_delay),
         day_delay_seconds=max(0.0, args.day_delay),
+        skip_complete_days=args.missing_only,
     )
     relevant_count = sum(
         1 for item in records if item.get("labor_relevance") == "relevant"
@@ -175,7 +190,7 @@ def main() -> None:
     review_count = sum(1 for item in records if item.get("labor_relevance") == "review")
     pdf_count = sum(1 for item in records if item.get("pdf_path"))
     print(
-        f"El Peruano histórico: {len(records)} registros; "
+        f"El Peruano histórico: {len(records)} registros procesados; "
         f"{relevant_count} relevantes; {review_count} por revisar; "
         f"{pdf_count} PDF almacenados."
     )
