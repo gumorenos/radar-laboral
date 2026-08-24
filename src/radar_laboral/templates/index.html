@@ -12,6 +12,8 @@
     .nav { display: flex; gap: 14px; flex-wrap: wrap; }
     .sub, .muted { color: #666; }
     .sub { margin-top: 0; }
+    .summary-strip { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 16px 0 4px; padding: 12px 14px; border: 1px solid #e5e5e5; border-radius: 10px; background: white; font-size: 14px; }
+    .summary-strip .push { margin-left: auto; }
     form { margin: 24px 0; }
     .search-row { display: flex; gap: 10px; flex-wrap: wrap; }
     input, select, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; }
@@ -30,6 +32,7 @@
     th { font-size: 13px; color: #555; background: #fafafa; }
     td { font-size: 14px; }
     .empty { padding: 36px; text-align: center; color: #666; }
+    .empty a { font-weight: 600; }
     .badge { display: inline-block; padding: 3px 7px; border-radius: 999px; font-size: 12px; background: #eee; white-space: nowrap; }
     .badge-relevant { background: #dcfce7; }
     .badge-review { background: #fef3c7; }
@@ -46,9 +49,17 @@
   <div class="header">
     <div>
       <h1>Radar Laboral Perú</h1>
-      <p class="sub">Repositorio local y consultable de normativa laboral peruana. La vista principal muestra solo documentos clasificados como laborales relevantes.</p>
+      <p class="sub">Repositorio local y consultable de normativa laboral peruana. La vista principal incluye documentos relevantes y los que requieren revisión.</p>
     </div>
-    <nav class="nav"><a href="/jurisprudencia">Jurisprudencia</a><a href="/status">Estado de sincronización →</a></nav>
+    <nav class="nav"><a href="/jurisprudencia">Jurisprudencia</a><a href="/status">Estado y carga histórica →</a></nav>
+  </div>
+
+  <div class="summary-strip">
+    <span><strong>{{ stats.relevant }}</strong> relevantes</span>
+    <span><strong>{{ stats.review }}</strong> por revisar</span>
+    <span><strong>{{ stats.total }}</strong> en inventario</span>
+    {% if date_bounds.earliest %}<span>Cobertura: <strong>{{ date_bounds.earliest }}</strong> → <strong>{{ date_bounds.latest }}</strong></span>{% else %}<span>Sin fechas cargadas</span>{% endif %}
+    <a class="push" href="/status">Cargar desde otra fecha</a>
   </div>
 
   {% set advanced_active = filters.source or filters.document_type or filters.issuer or filters.topic or filters.edition or filters.date_from or filters.date_to %}
@@ -56,9 +67,9 @@
     <div class="search-row">
       <input class="search-input" type="search" name="q" value="{{ query }}" placeholder="Buscar por número, título, tema, entidad o resumen…">
       <select name="relevance" aria-label="Relevancia">
+        <option value="tracked" {% if relevance == 'tracked' %}selected{% endif %}>Laborales + por revisar</option>
         <option value="relevant" {% if relevance == 'relevant' %}selected{% endif %}>Solo laborales relevantes</option>
-        <option value="review" {% if relevance == 'review' %}selected{% endif %}>Pendientes de revisar</option>
-        <option value="tracked" {% if relevance == 'tracked' %}selected{% endif %}>Relevantes + revisar</option>
+        <option value="review" {% if relevance == 'review' %}selected{% endif %}>Solo pendientes de revisar</option>
         <option value="not_labor" {% if relevance == 'not_labor' %}selected{% endif %}>Descartados / no laborales</option>
         <option value="all" {% if relevance == 'all' %}selected{% endif %}>Inventario completo</option>
       </select>
@@ -74,8 +85,8 @@
         <div class="filter-field"><label for="issuer">Entidad</label><select id="issuer" name="issuer"><option value="">Todas</option>{% for item in options.issuers %}<option value="{{ item }}" {% if item == filters.issuer %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
         <div class="filter-field"><label for="topic">Tema</label><select id="topic" name="topic"><option value="">Todos</option>{% for item in options.topics %}<option value="{{ item }}" {% if item == filters.topic %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
         <div class="filter-field"><label for="edition">Edición</label><select id="edition" name="edition"><option value="">Todas</option>{% for item in options.editions %}<option value="{{ item }}" {% if item == filters.edition %}selected{% endif %}>{{ 'Extraordinaria' if item == 'extraordinary' else 'Regular' if item == 'regular' else item }}</option>{% endfor %}</select></div>
-        <div class="filter-field"><label for="date_from">Desde</label><input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}"></div>
-        <div class="filter-field"><label for="date_to">Hasta</label><input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}"></div>
+        <div class="filter-field"><label for="date_from">Publicadas desde</label><input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}"></div>
+        <div class="filter-field"><label for="date_to">Publicadas hasta</label><input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}"></div>
       </div>
     </details>
   </form>
@@ -101,7 +112,11 @@
         </tbody>
       </table>
     {% else %}
-      <div class="empty">No hay normas que coincidan con estos filtros. Puedes ampliar la relevancia o limpiar los filtros.</div>
+      {% if stats.total > 0 and stats.relevant == 0 and stats.review == 0 and relevance in ['tracked', 'relevant', 'review'] %}
+        <div class="empty">Hay {{ stats.total }} documentos en el inventario, pero ninguno está clasificado como laboral o por revisar. Es posible que la base solo cubra días recientes sin normas laborales sustantivas. <a href="/status">Carga un rango histórico desde una fecha anterior.</a></div>
+      {% else %}
+        <div class="empty">No hay normas que coincidan con estos filtros. Puedes ampliar la relevancia, limpiar los filtros o <a href="/status">revisar la cobertura histórica</a>.</div>
+      {% endif %}
     {% endif %}
   </div>
 
