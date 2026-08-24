@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -144,6 +145,39 @@ NORM_COLUMNS = (
     "updated_at",
 )
 
+FTS_COLUMNS = ("title", "number", "summary", "issuer", "topic")
+FTS_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+FTS_TABLE_SQL = """
+CREATE VIRTUAL TABLE norms_fts USING fts5(
+    title,
+    number,
+    summary,
+    issuer,
+    topic,
+    content='norms',
+    content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 2'
+)
+"""
+FTS_TRIGGER_SQL = """
+CREATE TRIGGER IF NOT EXISTS norms_fts_ai AFTER INSERT ON norms BEGIN
+    INSERT INTO norms_fts(rowid, title, number, summary, issuer, topic)
+    VALUES (new.rowid, new.title, new.number, new.summary, new.issuer, new.topic);
+END;
+
+CREATE TRIGGER IF NOT EXISTS norms_fts_ad AFTER DELETE ON norms BEGIN
+    INSERT INTO norms_fts(norms_fts, rowid, title, number, summary, issuer, topic)
+    VALUES ('delete', old.rowid, old.title, old.number, old.summary, old.issuer, old.topic);
+END;
+
+CREATE TRIGGER IF NOT EXISTS norms_fts_au AFTER UPDATE ON norms BEGIN
+    INSERT INTO norms_fts(norms_fts, rowid, title, number, summary, issuer, topic)
+    VALUES ('delete', old.rowid, old.title, old.number, old.summary, old.issuer, old.topic);
+    INSERT INTO norms_fts(rowid, title, number, summary, issuer, topic)
+    VALUES (new.rowid, new.title, new.number, new.summary, new.issuer, new.topic);
+END;
+"""
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -218,12 +252,43 @@ def _backfill_norm_classification(conn: sqlite3.Connection) -> None:
         )
 
 
+def _ensure_norm_fts(conn: sqlite3.Connection) -> bool:
+    """Create and seed the optional FTS5 index without making FTS5 a hard dependency."""
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'norms_fts'"
+        ).fetchone()
+        if exists is None:
+            conn.execute(FTS_TABLE_SQL)
+            conn.execute("INSERT INTO norms_fts(norms_fts) VALUES ('rebuild')")
+        conn.executescript(FTS_TRIGGER_SQL)
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
+def _fts_available(conn: sqlite3.Connection) -> bool:
+    try:
+        conn.execute("SELECT rowid FROM norms_fts LIMIT 0")
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
+def _fts_query(query: str) -> str | None:
+    tokens = FTS_TOKEN_RE.findall(query.casefold())
+    if not tokens:
+        return None
+    return " ".join(f'"{token}"*' for token in tokens)
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
         _ensure_norm_columns(conn)
         _backfill_norm_classification(conn)
+        _ensure_norm_fts(conn)
 
 
 def enrich_norm(record: Mapping[str, object]) -> dict[str, object]:
@@ -286,44 +351,97 @@ def get_norm(norm_id: str):
         return conn.execute("SELECT * FROM norms WHERE id = ?", (norm_id,)).fetchone()
 
 
+def _search_filters(source: str, relevance: str, *, alias: str = "") -> tuple[list[str], list[str | int]]:
+    prefix = f"{alias}." if alias else ""
+    clauses: list[str] = []
+    params: list[str | int] = []
+
+    if source:
+        clauses.append(f"{prefix}source = ?")
+        params.append(source)
+
+    if relevance == "tracked":
+        clauses.append(f"{prefix}labor_relevance IN ('relevant', 'review')")
+    elif relevance in {"relevant", "review", "not_labor"}:
+        clauses.append(f"{prefix}labor_relevance = ?")
+        params.append(relevance)
+
+    return clauses, params
+
+
+def _search_norms_fts(
+    conn: sqlite3.Connection,
+    fts_query: str,
+    source: str,
+    relevance: str,
+    limit: int,
+):
+    clauses, params = _search_filters(source, relevance, alias="n")
+    clauses.insert(0, "norms_fts MATCH ?")
+    params.insert(0, fts_query)
+    where = " AND ".join(clauses)
+    params.append(limit)
+    return conn.execute(
+        f"""
+        SELECT n.*
+        FROM norms_fts
+        JOIN norms AS n ON n.rowid = norms_fts.rowid
+        WHERE {where}
+        ORDER BY bm25(norms_fts, 5.0, 4.0, 1.0, 2.0, 3.0),
+                 n.publication_date DESC,
+                 n.captured_at DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
+def _search_norms_like(
+    conn: sqlite3.Connection,
+    query: str,
+    source: str,
+    relevance: str,
+    limit: int,
+):
+    clauses, params = _search_filters(source, relevance)
+    if query:
+        like = f"%{query}%"
+        clauses.insert(
+            0,
+            "(title LIKE ? OR number LIKE ? OR summary LIKE ? OR issuer LIKE ? OR topic LIKE ?)",
+        )
+        params[0:0] = [like, like, like, like, like]
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    return conn.execute(
+        f"""
+        SELECT *
+        FROM norms
+        {where}
+        ORDER BY publication_date DESC, captured_at DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
 def search_norms(
     query: str = "",
     source: str = "",
     relevance: str = "relevant",
     limit: int = 200,
 ):
-    clauses: list[str] = []
-    params: list[str | int] = []
-
-    if query:
-        like = f"%{query}%"
-        clauses.append(
-            "(title LIKE ? OR number LIKE ? OR summary LIKE ? OR issuer LIKE ? OR topic LIKE ?)"
-        )
-        params.extend([like, like, like, like, like])
-
-    if source:
-        clauses.append("source = ?")
-        params.append(source)
-
-    if relevance == "tracked":
-        clauses.append("labor_relevance IN ('relevant', 'review')")
-    elif relevance in {"relevant", "review", "not_labor"}:
-        clauses.append("labor_relevance = ?")
-        params.append(relevance)
-
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    sql = f"""
-        SELECT *
-        FROM norms
-        {where}
-        ORDER BY publication_date DESC, captured_at DESC
-        LIMIT ?
-    """
-    params.append(limit)
+    safe_limit = max(1, min(int(limit), 1000))
+    fts_query = _fts_query(query) if query else None
 
     with connect() as conn:
-        return conn.execute(sql, params).fetchall()
+        if fts_query and _fts_available(conn):
+            try:
+                return _search_norms_fts(conn, fts_query, source, relevance, safe_limit)
+            except sqlite3.OperationalError:
+                pass
+        return _search_norms_like(conn, query, source, relevance, safe_limit)
 
 
 def list_sources() -> list[str]:
