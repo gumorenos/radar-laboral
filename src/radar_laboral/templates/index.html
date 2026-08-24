@@ -9,7 +9,8 @@
     main { max-width: 1280px; margin: 0 auto; padding: 32px 20px; }
     h1 { margin-bottom: 6px; }
     .header { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
-    .sub { color: #666; margin-top: 0; }
+    .sub, .muted { color: #666; }
+    .sub { margin-top: 0; }
     form { margin: 24px 0; }
     .search-row { display: flex; gap: 10px; flex-wrap: wrap; }
     input, select, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; }
@@ -27,7 +28,6 @@
     th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
     th { font-size: 13px; color: #555; background: #fafafa; }
     td { font-size: 14px; }
-    .muted { color: #777; }
     .empty { padding: 36px; text-align: center; color: #666; }
     .badge { display: inline-block; padding: 3px 7px; border-radius: 999px; font-size: 12px; background: #eee; white-space: nowrap; }
     .badge-relevant { background: #dcfce7; }
@@ -68,65 +68,13 @@
     <details {% if advanced_active %}open{% endif %}>
       <summary>Filtros avanzados{% if advanced_active %} · activos{% endif %}</summary>
       <div class="filters">
-        <div class="filter-field">
-          <label for="source">Fuente</label>
-          <select id="source" name="source">
-            <option value="">Todas</option>
-            {% for item in options.sources %}
-              <option value="{{ item }}" {% if item == filters.source %}selected{% endif %}>{{ item }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="filter-field">
-          <label for="document_type">Tipo de norma</label>
-          <select id="document_type" name="document_type">
-            <option value="">Todos</option>
-            {% for item in options.document_types %}
-              <option value="{{ item }}" {% if item == filters.document_type %}selected{% endif %}>{{ item }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="filter-field">
-          <label for="issuer">Entidad</label>
-          <select id="issuer" name="issuer">
-            <option value="">Todas</option>
-            {% for item in options.issuers %}
-              <option value="{{ item }}" {% if item == filters.issuer %}selected{% endif %}>{{ item }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="filter-field">
-          <label for="topic">Tema</label>
-          <select id="topic" name="topic">
-            <option value="">Todos</option>
-            {% for item in options.topics %}
-              <option value="{{ item }}" {% if item == filters.topic %}selected{% endif %}>{{ item }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="filter-field">
-          <label for="edition">Edición</label>
-          <select id="edition" name="edition">
-            <option value="">Todas</option>
-            {% for item in options.editions %}
-              <option value="{{ item }}" {% if item == filters.edition %}selected{% endif %}>{{ 'Extraordinaria' if item == 'extraordinary' else 'Regular' if item == 'regular' else item }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="filter-field">
-          <label for="date_from">Desde</label>
-          <input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}">
-        </div>
-
-        <div class="filter-field">
-          <label for="date_to">Hasta</label>
-          <input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}">
-        </div>
+        <div class="filter-field"><label for="source">Fuente</label><select id="source" name="source"><option value="">Todas</option>{% for item in options.sources %}<option value="{{ item }}" {% if item == filters.source %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="filter-field"><label for="document_type">Tipo de norma</label><select id="document_type" name="document_type"><option value="">Todos</option>{% for item in options.document_types %}<option value="{{ item }}" {% if item == filters.document_type %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="filter-field"><label for="issuer">Entidad</label><select id="issuer" name="issuer"><option value="">Todas</option>{% for item in options.issuers %}<option value="{{ item }}" {% if item == filters.issuer %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="filter-field"><label for="topic">Tema</label><select id="topic" name="topic"><option value="">Todos</option>{% for item in options.topics %}<option value="{{ item }}" {% if item == filters.topic %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="filter-field"><label for="edition">Edición</label><select id="edition" name="edition"><option value="">Todas</option>{% for item in options.editions %}<option value="{{ item }}" {% if item == filters.edition %}selected{% endif %}>{{ 'Extraordinaria' if item == 'extraordinary' else 'Regular' if item == 'regular' else item }}</option>{% endfor %}</select></div>
+        <div class="filter-field"><label for="date_from">Desde</label><input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}"></div>
+        <div class="filter-field"><label for="date_to">Hasta</label><input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}"></div>
       </div>
     </details>
   </form>
@@ -134,28 +82,16 @@
   <div class="table-wrap">
     {% if rows %}
       <table>
-        <thead>
-          <tr>
-            <th>Fecha</th><th>Norma</th><th>Título</th><th>Entidad</th><th>Tema</th><th>Relevancia</th><th>Estado</th><th>Fuente</th><th>PDF</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Fecha</th><th>Norma</th><th>Título</th><th>Entidad</th><th>Tema</th><th>Relevancia</th><th>Estado</th><th>Fuente</th><th>PDF</th></tr></thead>
         <tbody>
           {% for row in rows %}
           <tr>
             <td>{{ row.publication_date or '—' }}</td>
-            <td>
-              <strong>{{ row.document_type or '' }} {{ row.number or '' }}</strong>
-              {% if row.edition == 'extraordinary' %}<br><span class="badge badge-extraordinary">Extraordinaria</span>{% endif %}
-            </td>
-            <td>{{ row.title }}{% if row.summary %}<br><span class="muted">{{ row.summary }}</span>{% endif %}</td>
+            <td><strong>{{ row.document_type or '' }} {{ row.number or '' }}</strong>{% if row.edition == 'extraordinary' %}<br><span class="badge badge-extraordinary">Extraordinaria</span>{% endif %}</td>
+            <td><a href="/norm/{{ row.id }}"><strong>{{ row.title }}</strong></a>{% if row.summary %}<br><span class="muted">{{ row.summary }}</span>{% endif %}</td>
             <td>{{ row.issuer or '—' }}</td>
             <td>{{ row.topic or '—' }}</td>
-            <td title="{{ row.relevance_reason or '' }}">
-              {% if row.labor_relevance == 'relevant' %}<span class="badge badge-relevant">Relevante</span>
-              {% elif row.labor_relevance == 'review' %}<span class="badge badge-review">Revisar</span>
-              {% elif row.labor_relevance == 'not_labor' %}<span class="badge badge-not_labor">No laboral</span>
-              {% else %}—{% endif %}
-            </td>
+            <td title="{{ row.relevance_reason or '' }}">{% if row.labor_relevance == 'relevant' %}<span class="badge badge-relevant">Relevante</span>{% elif row.labor_relevance == 'review' %}<span class="badge badge-review">Revisar</span>{% elif row.labor_relevance == 'not_labor' %}<span class="badge badge-not_labor">No laboral</span>{% else %}—{% endif %}</td>
             <td>{{ row.status or '—' }}</td>
             <td><a href="{{ row.official_url }}" target="_blank" rel="noreferrer">{{ row.source }}</a></td>
             <td>{% if row.pdf_url or row.pdf_path %}<a href="/norm/{{ row.id }}/pdf" target="_blank">Abrir PDF</a>{% else %}—{% endif %}</td>
@@ -170,17 +106,9 @@
 
   {% if pagination.has_previous or pagination.has_next %}
     <nav class="pagination" aria-label="Paginación">
-      {% if pagination.has_previous %}
-        <a href="{{ pagination.previous_url }}">← Anterior</a>
-      {% else %}
-        <span class="page-disabled">← Anterior</span>
-      {% endif %}
+      {% if pagination.has_previous %}<a href="{{ pagination.previous_url }}">← Anterior</a>{% else %}<span class="page-disabled">← Anterior</span>{% endif %}
       <span>Página {{ pagination.page }}</span>
-      {% if pagination.has_next %}
-        <a href="{{ pagination.next_url }}">Siguiente →</a>
-      {% else %}
-        <span class="page-disabled">Siguiente →</span>
-      {% endif %}
+      {% if pagination.has_next %}<a href="{{ pagination.next_url }}">Siguiente →</a>{% else %}<span class="page-disabled">Siguiente →</span>{% endif %}
     </nav>
   {% endif %}
 </main>
