@@ -21,7 +21,6 @@ COURT = "Tribunal de Fiscalización Laboral - Sala Plena"
 DOCUMENT_TYPE = "Resolución de Sala Plena"
 BASE_URL = "https://www.gob.pe"
 LIST_URL = f"{BASE_URL}/institucion/sunafil/normas-legales/tipos/145-resolucion-de-sala-plena"
-LIST_PAGE_SIZE = 25
 DEFAULT_MAX_PAGES = 1
 MAX_PAGES = 20
 
@@ -89,7 +88,7 @@ def _allowed_gob_url(url: str) -> bool:
 
 def _detail_match(url: str) -> re.Match[str] | None:
     parsed = urlparse(url)
-    if parsed.hostname not in {"gob.pe", "www.gob.pe"}:
+    if (parsed.hostname or "").lower() not in {"gob.pe", "www.gob.pe"}:
         return None
     return DETAIL_RE.match(parsed.path.rstrip("/"))
 
@@ -122,22 +121,12 @@ def _card_for(anchor: Tag) -> Tag:
 
 def _summary_from_card(card: Tag, heading: str) -> str | None:
     candidates: list[str] = []
-    for node in card.find_all(["p", "div", "span"]):
+    for node in card.find_all("p"):
         text = _clean(node.get_text(" ", strip=True))
-        if not text or text == heading or len(text) < 25:
-            continue
-        if SPANISH_DATE_RE.fullmatch(text):
-            continue
-        lowered = text.casefold()
-        if lowered in {"descargar", "leer más", "leer mas"}:
-            continue
-        if HEADING_RE.fullmatch(text):
+        if len(text) < 25 or text == heading or SPANISH_DATE_RE.fullmatch(text):
             continue
         candidates.append(text)
-    if not candidates:
-        return None
-    candidates.sort(key=len)
-    return candidates[0]
+    return max(candidates, key=len) if candidates else None
 
 
 def _pdf_from_node(node: Tag, base_url: str) -> str | None:
@@ -150,9 +139,19 @@ def _pdf_from_node(node: Tag, base_url: str) -> str | None:
     return None
 
 
+def _has_next_sheet(soup: BeautifulSoup, current_sheet: int) -> bool:
+    for anchor in soup.find_all("a", href=True):
+        href = urljoin(LIST_URL, str(anchor.get("href", "")).strip())
+        for value in parse_qs(urlparse(href).query).get("sheet", []):
+            if value.isdigit() and int(value) > current_sheet:
+                return True
+    return False
+
+
 def parse_listing_html(
     html: str,
     *,
+    current_sheet: int = 1,
     captured_at: str | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
     soup = BeautifulSoup(html, "html.parser")
@@ -164,20 +163,17 @@ def parse_listing_html(
         detail = _detail_match(official_url)
         if detail is None:
             continue
-
         heading = _clean(anchor.get_text(" ", strip=True))
         number = _number_from_heading(heading)
         if not number:
             continue
 
-        resource_id = detail.group("resource_id")
         card = _card_for(anchor)
-        card_text = _clean(card.get_text(" ", strip=True))
-        date_match = SPANISH_DATE_RE.search(card_text)
+        date_match = SPANISH_DATE_RE.search(_clean(card.get_text(" ", strip=True)))
         if date_match is None:
             continue
         summary = _summary_from_card(card, heading)
-
+        resource_id = detail.group("resource_id")
         records[resource_id] = {
             "id": f"sunafil-tfl:{resource_id}",
             "source": SOURCE,
@@ -199,20 +195,12 @@ def parse_listing_html(
             "updated_at": captured_at,
         }
 
-    next_sheet = False
-    for anchor in soup.find_all("a", href=True):
-        href = urljoin(LIST_URL, str(anchor.get("href", "")).strip())
-        sheet_values = parse_qs(urlparse(href).query).get("sheet", [])
-        if any(value.isdigit() and int(value) > 1 for value in sheet_values):
-            next_sheet = True
-            break
-
     ordered = sorted(
         records.values(),
         key=lambda item: (str(item.get("publication_date") or ""), str(item["id"])),
         reverse=True,
     )
-    return ordered, next_sheet
+    return ordered, _has_next_sheet(soup, current_sheet)
 
 
 def _detail_heading(soup: BeautifulSoup) -> str | None:
@@ -220,8 +208,7 @@ def _detail_heading(soup: BeautifulSoup) -> str | None:
         text = _clean(node.get_text(" ", strip=True))
         if _number_from_heading(text):
             return text
-    match = HEADING_RE.search(_clean(soup.get_text(" ", strip=True)))
-    return _clean(match.group(0)) if match else None
+    return None
 
 
 def _detail_summary(soup: BeautifulSoup, heading: str | None) -> str | None:
@@ -229,12 +216,10 @@ def _detail_summary(soup: BeautifulSoup, heading: str | None) -> str | None:
     candidates: list[str] = []
     for node in main.find_all("p"):
         text = _clean(node.get_text(" ", strip=True))
-        if len(text) < 35 or text == heading:
+        if len(text) < 35 or text == heading or SPANISH_DATE_RE.fullmatch(text):
             continue
         lowered = text.casefold()
         if "plataforma digital única" in lowered or "¿no encuentras lo que buscas?" in lowered:
-            continue
-        if SPANISH_DATE_RE.fullmatch(text):
             continue
         candidates.append(text)
     if candidates:
@@ -267,12 +252,10 @@ def parse_detail_html(
         raise TflCollectorError(f"No se pudo extraer el número de resolución en {official_url}")
 
     main = soup.find("main") or soup
-    page_text = _clean(main.get_text(" ", strip=True))
-    date_match = SPANISH_DATE_RE.search(page_text)
+    date_match = SPANISH_DATE_RE.search(_clean(main.get_text(" ", strip=True)))
     if date_match is None:
         raise TflCollectorError(f"No se encontró fecha oficial en {official_url}")
     summary = _detail_summary(soup, heading)
-    pdf_url = _pdf_from_node(main, official_url)
     captured_at = captured_at or _utc_now()
     resource_id = detail.group("resource_id")
 
@@ -290,7 +273,7 @@ def parse_detail_html(
         "topic": None,
         "binding_level": _binding_level(summary),
         "official_url": official_url,
-        "pdf_url": pdf_url,
+        "pdf_url": _pdf_from_node(main, official_url),
         "pdf_path": None,
         "sha256": None,
         "captured_at": captured_at,
@@ -304,7 +287,7 @@ def fetch_listing_page(
 ) -> tuple[list[dict[str, object]], bool]:
     response = session.get(LIST_URL, params={"sheet": sheet}, timeout=30)
     response.raise_for_status()
-    return parse_listing_html(response.text)
+    return parse_listing_html(response.text, current_sheet=sheet)
 
 
 def fetch_detail(session: requests.Session, official_url: str) -> dict[str, object]:
@@ -397,8 +380,9 @@ def cache_pdf(session: requests.Session, record: dict[str, object]) -> None:
         except Exception:
             destination.unlink(missing_ok=True)
             raise
+        resolved_url = response.url
 
-    record["pdf_url"] = response.url
+    record["pdf_url"] = resolved_url
     record["pdf_path"] = relative_path.as_posix()
     record["sha256"] = digest.hexdigest()
 
@@ -476,7 +460,9 @@ def collect(
         for sheet in range(1, max_pages + 1):
             page_records, has_next = fetch_listing_page(session, sheet)
             if sheet == 1 and not page_records:
-                raise TflCollectorError("SUNAFIL TFL no devolvió resoluciones reconocibles en la primera página.")
+                raise TflCollectorError(
+                    "SUNAFIL TFL no devolvió resoluciones reconocibles en la primera página."
+                )
             new_count = 0
             for record in page_records:
                 key = str(record["id"])
@@ -491,14 +477,28 @@ def collect(
         for index, listing in enumerate(discovered.values()):
             record = dict(listing)
             existing = get_case_law(str(record["id"]))
-            needs_detail = refresh_details or existing is None or not existing["summary"] or not existing["pdf_url"]
+            needs_detail = (
+                refresh_details
+                or existing is None
+                or not existing["summary"]
+                or not existing["pdf_url"]
+            )
             if needs_detail:
-                detail = fetch_detail(session, str(record["official_url"]))
-                record = _merge_detail(record, detail)
+                record = _merge_detail(
+                    record,
+                    fetch_detail(session, str(record["official_url"])),
+                )
                 if detail_delay_seconds > 0 and index < len(discovered) - 1:
                     time.sleep(detail_delay_seconds)
             elif existing is not None:
-                for field in ("summary", "binding_level", "pdf_url", "pdf_path", "sha256", "topic"):
+                for field in (
+                    "summary",
+                    "binding_level",
+                    "pdf_url",
+                    "pdf_path",
+                    "sha256",
+                    "topic",
+                ):
                     if existing[field] is not None:
                         record[field] = existing[field]
                 if existing["captured_at"]:
@@ -515,7 +515,11 @@ def collect(
             merge_catalog(stored, catalog_path)
         pdf_count = sum(1 for item in stored if item.get("pdf_path"))
         latest_date = max(
-            (str(item.get("publication_date")) for item in stored if item.get("publication_date")),
+            (
+                str(item.get("publication_date"))
+                for item in stored
+                if item.get("publication_date")
+            ),
             default=None,
         )
         finish_sync_run(
@@ -541,13 +545,28 @@ def collect(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sincroniza Resoluciones de Sala Plena del Tribunal de Fiscalización Laboral de SUNAFIL"
+        description=(
+            "Sincroniza Resoluciones de Sala Plena del Tribunal de Fiscalización Laboral de SUNAFIL"
+        )
     )
     pages = parser.add_mutually_exclusive_group()
-    pages.add_argument("--pages", type=int, default=DEFAULT_MAX_PAGES, help="Número de páginas del listado a procesar")
-    pages.add_argument("--all-pages", action="store_true", help="Recorre todo el histórico disponible")
+    pages.add_argument(
+        "--pages",
+        type=int,
+        default=DEFAULT_MAX_PAGES,
+        help="Número de páginas del listado a procesar",
+    )
+    pages.add_argument(
+        "--all-pages",
+        action="store_true",
+        help="Recorre todo el histórico disponible",
+    )
     parser.add_argument("--no-pdf", action="store_true", help="No descarga PDFs oficiales")
-    parser.add_argument("--refresh-details", action="store_true", help="Vuelve a consultar el detalle de registros ya almacenados")
+    parser.add_argument(
+        "--refresh-details",
+        action="store_true",
+        help="Vuelve a consultar el detalle de registros ya almacenados",
+    )
     parser.add_argument("--catalog", type=Path, default=default_catalog_path())
     parser.add_argument("--page-delay", type=float, default=0.2)
     parser.add_argument("--detail-delay", type=float, default=0.1)
@@ -564,8 +583,8 @@ def main() -> None:
     pdf_count = sum(1 for item in records if item.get("pdf_path"))
     mandatory = sum(1 for item in records if item.get("binding_level"))
     print(
-        f"SUNAFIL TFL: {len(records)} resoluciones; {mandatory} con fuerza/alcance explícito; "
-        f"{pdf_count} PDF almacenados."
+        f"SUNAFIL TFL: {len(records)} resoluciones; "
+        f"{mandatory} con fuerza/alcance explícito; {pdf_count} PDF almacenados."
     )
 
 
