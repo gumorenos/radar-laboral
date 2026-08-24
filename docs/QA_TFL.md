@@ -1,12 +1,10 @@
-# QA pendiente — SUNAFIL Tribunal de Fiscalización Laboral
+# QA — SUNAFIL Tribunal de Fiscalización Laboral
 
-Este checklist cubre pruebas que requieren red real, PDFs oficiales o el volumen persistente de la Raspberry Pi. Las pruebas de parser/orquestación permanecen en CI.
+Este checklist separa el QA ya completado contra SUNAFIL real de las pruebas que todavía requieren el volumen persistente de la Raspberry Pi.
 
-## Gate live antes de merge
+## QA live completado antes de merge
 
-Debe ejecutarse desde GitHub Actions temporal o entorno equivalente con acceso a `gob.pe`, sin convertir la fuente externa en dependencia permanente del CI.
-
-Fuente:
+Fuente oficial:
 
 ```text
 https://www.gob.pe/institucion/sunafil/normas-legales/tipos/145-resolucion-de-sala-plena
@@ -19,19 +17,25 @@ Resolución de Sala Plena N.° 001-2025-SUNAFIL-TFL
 https://www.gob.pe/institucion/sunafil/normas-legales/6556395-001-2025-sunafil-tfl
 ```
 
-Criterios del gate:
+Gate ejecutado en GitHub Actions temporal el 2026-08-24. Resultado:
 
-- el listado reconoce el registro `sunafil-tfl:6556395`;
+- listado real: 53 resoluciones distribuidas en 25 + 25 + 3;
+- paginación real: páginas 1 y 2 con siguiente, página 3 final;
+- registro `sunafil-tfl:6556395` reconocido;
 - número `001-2025-SUNAFIL-TFL`;
 - fecha de publicación `2025-03-10`;
-- el detalle conserva la sumilla oficial y encuentra un PDF oficial;
-- `binding_level` se establece como `precedente administrativo de observancia obligatoria` porque la sumilla oficial contiene expresamente esa declaración;
-- una resolución cuya sumilla no contenga lenguaje de obligatoriedad debe quedar con `binding_level = NULL`;
-- el histórico completo devuelve al menos los 53 registros observados al crear el collector. No usar 53 como igualdad permanente: nuevas Resoluciones de Sala Plena incrementarán naturalmente el total.
+- sumilla oficial completa extraída desde el bloque `description rule-content` (527 caracteres en el control);
+- `binding_level = precedente administrativo de observancia obligatoria` únicamente porque la sumilla oficial lo declara expresamente;
+- PDF oficial descargado y validado con firma `%PDF`;
+- tamaño observado del PDF de control: 957145 bytes;
+- SHA-256 observado: `8960cfa1817e499775d60d599cc00e941dad879942bfacda186984e1eedef889`;
+- una segunda llamada al cache reutilizó el PDF local sin hacer red.
 
-Después del gate, eliminar el workflow temporal para no depender de SUNAFIL en cada PR.
+El workflow temporal de QA live se elimina después de este gate para que el CI normal no dependa de `gob.pe`.
 
-## Smoke de metadatos en Raspberry
+No usar 53 como igualdad permanente: nuevas Resoluciones de Sala Plena incrementarán naturalmente el total.
+
+## Smoke de metadatos en Raspberry — pendiente
 
 Después de fusionar y desplegar:
 
@@ -51,7 +55,7 @@ Criterios:
 - la ficha `001-2025-SUNAFIL-TFL` muestra la fuente oficial y el nivel explícito de obligatoriedad;
 - `sync_runs` registra `source = 'SUNAFIL TFL'`, `status = 'success'` y `records_seen > 0`.
 
-## Idempotencia e incrementalidad
+## Idempotencia e incrementalidad en volumen persistente — pendiente
 
 Ejecutar el comando anterior una segunda vez.
 
@@ -72,9 +76,9 @@ docker compose run --rm radar-laboral \
   --refresh-details
 ```
 
-## PDF real
+## PDF real en Raspberry — pendiente de entorno ARM/volumen
 
-Primero limitar la prueba a una página:
+La lógica y un PDF real ya pasaron el gate de GitHub Actions. En Raspberry queda confirmar el volumen persistente:
 
 ```bash
 docker compose run --rm radar-laboral \
@@ -91,7 +95,7 @@ Criterios:
 - si un PDF local se corrompe y su hash ya no coincide, el collector lo elimina y lo descarga nuevamente;
 - una redirección fuera de dominios `*.gob.pe` no debe aceptarse como PDF oficial.
 
-## UI
+## UI — pendiente de smoke desplegado
 
 Comprobar:
 
@@ -110,4 +114,4 @@ Criterios:
 
 ## Daemon
 
-El collector TFL **no debe añadirse todavía** al daemon de 6 horas hasta que el gate live y el smoke en Raspberry hayan pasado. Una vez estable, integrar preferentemente con una frecuencia menor que El Peruano o con una ejecución que procese solo la primera página, para evitar releer el histórico innecesariamente.
+El collector TFL no se incorpora todavía al daemon de 6 horas. Primero debe pasar el smoke en Raspberry. Después conviene programarlo con una frecuencia menor que El Peruano y procesar por defecto solo la primera página para no releer el histórico innecesariamente.
