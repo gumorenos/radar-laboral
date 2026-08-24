@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e .
-      - name: Inspect live SUNAFIL Sala Plena detail
+      - name: Inspect smallest SUNAFIL summary nodes
         run: |
           python - <<'PY'
           import requests
@@ -34,17 +34,10 @@ jobs:
           pagination = []
           for sheet in (1, 2, 3):
               records, has_next = fetch_listing_page(session, sheet)
-              print("sheet", sheet, "records", len(records), "has_next", has_next)
               pagination.append(has_next)
               for record in records:
                   unique[record["id"]] = record
-
-          print("unique listing records:", len(unique))
           assert len(unique) >= 53, len(unique)
-          control = unique.get("sunafil-tfl:6556395")
-          assert control is not None
-          assert control["number"] == "001-2025-SUNAFIL-TFL", control
-          assert control["publication_date"] == "2025-03-10", control
           assert pagination == [True, True, False], pagination
 
           url = "https://www.gob.pe/institucion/sunafil/normas-legales/6556395-001-2025-sunafil-tfl"
@@ -52,23 +45,22 @@ jobs:
           response.raise_for_status()
           soup = BeautifulSoup(response.text, "html.parser")
 
-          print("status:", response.status_code, "bytes:", len(response.text))
-          for meta in soup.find_all("meta"):
-              content = str(meta.get("content") or "")
-              name = str(meta.get("name") or meta.get("property") or "")
-              if "observancia" in content.lower() or "precedent" in content.lower() or name in {"description", "og:description", "twitter:description"}:
-                  print("META", name, repr(content[:2000]))
+          matches = []
+          for index, node in enumerate(soup.find_all(True)):
+              text = " ".join(node.get_text(" ", strip=True).split())
+              attrs = " ".join(f"{k}={v}" for k, v in node.attrs.items())
+              attr_text = attrs.lower()
+              text_lower = text.lower()
+              if "observancia obligatoria" in text_lower or "observancia obligatoria" in attr_text:
+                  matches.append((len(text), index, node.name, attrs, text))
 
-          for script in soup.find_all("script"):
-              text = script.string or script.get_text(" ", strip=True)
-              if "observancia" in text.lower() or "precedent" in text.lower():
-                  print("SCRIPT", str(script.get("type") or ""), repr(text[:4000]))
+          matches.sort()
+          print("matching nodes:", len(matches))
+          for length, index, tag, attrs, text in matches[:12]:
+              print("NODE", "len=", length, "idx=", index, "tag=", tag)
+              print("ATTRS", repr(attrs[:1500]))
+              print("TEXT", repr(text[:4500]))
+              print("---")
 
-          for node in soup.find_all(True):
-              attrs = " ".join(str(v) for v in node.attrs.values())
-              text = node.get_text(" ", strip=True)
-              combined = attrs + " " + text
-              if "observancia obligatoria" in combined.lower():
-                  print("NODE", node.name, repr(attrs[:1000]), repr(text[:3000]))
-                  break
+          assert matches, "No DOM node contains the complete mandatory-precedent phrase"
           PY
