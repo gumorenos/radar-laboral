@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS norms (
     issuer TEXT,
     topic TEXT,
     status TEXT,
+    edition TEXT,
     labor_relevance TEXT,
     relevance_reason TEXT,
     classification_version INTEGER,
@@ -40,6 +41,8 @@ CREATE INDEX IF NOT EXISTS idx_norms_source
     ON norms(source);
 CREATE INDEX IF NOT EXISTS idx_norms_topic
     ON norms(topic);
+CREATE INDEX IF NOT EXISTS idx_norms_edition
+    ON norms(edition);
 
 CREATE TABLE IF NOT EXISTS case_law (
     id TEXT PRIMARY KEY,
@@ -131,6 +134,7 @@ NORM_COLUMNS = (
     "issuer",
     "topic",
     "status",
+    "edition",
     "labor_relevance",
     "relevance_reason",
     "classification_version",
@@ -172,6 +176,7 @@ def _ensure_norm_columns(conn: sqlite3.Connection) -> None:
         "labor_relevance": "TEXT",
         "relevance_reason": "TEXT",
         "classification_version": "INTEGER",
+        "edition": "TEXT",
     }
     for column, sql_type in additions.items():
         if column not in existing:
@@ -179,6 +184,7 @@ def _ensure_norm_columns(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_norms_labor_relevance ON norms(labor_relevance)"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_norms_edition ON norms(edition)")
 
 
 def _backfill_norm_classification(conn: sqlite3.Connection) -> None:
@@ -262,6 +268,7 @@ def upsert_norm(record: Mapping[str, object]) -> dict[str, object]:
             issuer = COALESCE(excluded.issuer, norms.issuer),
             topic = excluded.topic,
             status = COALESCE(excluded.status, norms.status),
+            edition = COALESCE(excluded.edition, norms.edition),
             labor_relevance = excluded.labor_relevance,
             relevance_reason = excluded.relevance_reason,
             classification_version = excluded.classification_version,
