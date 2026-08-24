@@ -404,6 +404,7 @@ def _search_norms_fts(
     source: str,
     relevance: str,
     limit: int,
+    offset: int,
     *,
     document_type: str = "",
     issuer: str = "",
@@ -426,7 +427,7 @@ def _search_norms_fts(
     clauses.insert(0, "norms_fts MATCH ?")
     params.insert(0, fts_query)
     where = " AND ".join(clauses)
-    params.append(limit)
+    params.extend([limit, offset])
     return conn.execute(
         f"""
         SELECT n.*
@@ -436,7 +437,7 @@ def _search_norms_fts(
         ORDER BY bm25(norms_fts, 5.0, 4.0, 1.0, 2.0, 3.0),
                  n.publication_date DESC,
                  n.captured_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
         params,
     ).fetchall()
@@ -448,6 +449,7 @@ def _search_norms_like(
     source: str,
     relevance: str,
     limit: int,
+    offset: int,
     *,
     document_type: str = "",
     issuer: str = "",
@@ -475,14 +477,14 @@ def _search_norms_like(
         params[0:0] = [like, like, like, like, like]
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.append(limit)
+    params.extend([limit, offset])
     return conn.execute(
         f"""
         SELECT *
         FROM norms
         {where}
         ORDER BY publication_date DESC, captured_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
         params,
     ).fetchall()
@@ -493,6 +495,7 @@ def search_norms(
     source: str = "",
     relevance: str = "relevant",
     limit: int = 200,
+    offset: int = 0,
     *,
     document_type: str = "",
     issuer: str = "",
@@ -502,6 +505,7 @@ def search_norms(
     date_to: str = "",
 ):
     safe_limit = max(1, min(int(limit), 1000))
+    safe_offset = max(0, int(offset))
     fts_query = _fts_query(query) if query else None
     filter_args = {
         "document_type": document_type,
@@ -521,6 +525,7 @@ def search_norms(
                     source,
                     relevance,
                     safe_limit,
+                    safe_offset,
                     **filter_args,
                 )
             except sqlite3.OperationalError:
@@ -531,6 +536,7 @@ def search_norms(
             source,
             relevance,
             safe_limit,
+            safe_offset,
             **filter_args,
         )
 

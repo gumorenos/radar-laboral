@@ -114,6 +114,33 @@ class NormFilterTests(unittest.TestCase):
         )
         self.assertEqual([row["id"] for row in rows], ["filter-b"])
 
+    def test_offset_applies_after_filtering(self) -> None:
+        first = search_norms(relevance="all", limit=1, offset=0)
+        second = search_norms(relevance="all", limit=1, offset=1)
+        self.assertEqual([row["id"] for row in first], ["filter-c"])
+        self.assertEqual([row["id"] for row in second], ["filter-b"])
+
+        ranked = search_norms(
+            query="regulan",
+            relevance="relevant",
+            issuer="TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            limit=2,
+            offset=0,
+        )
+        offset_ranked = search_norms(
+            query="regulan",
+            relevance="relevant",
+            issuer="TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            limit=1,
+            offset=1,
+        )
+        self.assertEqual(len(ranked), 2)
+        self.assertEqual([row["id"] for row in offset_ranked], [ranked[1]["id"]])
+
+    def test_negative_offset_is_clamped_to_zero(self) -> None:
+        rows = search_norms(relevance="all", limit=1, offset=-50)
+        self.assertEqual([row["id"] for row in rows], ["filter-c"])
+
     def test_filter_options_are_distinct_and_sorted(self) -> None:
         options = list_norm_filter_options()
         self.assertEqual(options["sources"], ["Archivo oficial", "El Peruano"])
