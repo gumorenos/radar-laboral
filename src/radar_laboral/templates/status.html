@@ -29,6 +29,7 @@
     .field label { font-size: 13px; color: #555; font-weight: 600; }
     input, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; box-sizing: border-box; width: 100%; }
     button { cursor: pointer; background: #222; color: white; }
+    input:disabled, button:disabled { cursor: not-allowed; opacity: .55; }
     .check { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
     .check input { width: auto; }
     .notice { padding: 11px 13px; border-radius: 8px; margin: 12px 0; }
@@ -68,30 +69,29 @@
       {% if created == '1' %}<div class="notice notice-ok">Solicitud #{{ queued }} encolada correctamente.</div>{% else %}<div class="notice notice-warn">La solicitud #{{ queued }} ya estaba pendiente o en ejecución; no se duplicó.</div>{% endif %}
     {% endif %}
     {% if sync_error %}<div class="notice notice-error">{{ sync_error }}</div>{% endif %}
-
-    {% if admin_enabled %}
-      <form class="sync-form" method="post" action="/admin/backfill">
-        <div class="field">
-          <label for="start_date">Traer desde</label>
-          <input id="start_date" type="date" name="start_date" max="{{ today }}" required>
-        </div>
-        <div class="field">
-          <label for="end_date">Hasta</label>
-          <input id="end_date" type="date" name="end_date" value="{{ today }}" max="{{ today }}" required>
-        </div>
-        <div class="field">
-          <label for="admin_token">Clave administrativa</label>
-          <input id="admin_token" type="password" name="admin_token" autocomplete="current-password" required>
-        </div>
-        <div class="field">
-          <label class="check"><input type="checkbox" name="download_pdfs" value="1"> Descargar también PDFs laborales</label>
-          <button type="submit">Encolar carga histórica</button>
-        </div>
-      </form>
-      <p class="sub">Máximo por solicitud: {{ max_backfill_days }} días. Para la primera carga conviene dejar los PDFs desmarcados y completar metadatos primero.</p>
-    {% else %}
-      <div class="notice notice-warn">El selector está visible en el producto pero la ejecución web está deshabilitada hasta configurar <code>RADAR_ADMIN_TOKEN</code>. Esto evita que cualquier visitante del dominio público pueda disparar cargas contra El Peruano.</div>
+    {% if not admin_enabled %}
+      <div class="notice notice-warn">La carga desde la web está deshabilitada hasta configurar <code>RADAR_ADMIN_TOKEN</code>. Los selectores se muestran para dejar clara la funcionalidad, pero no se puede encolar trabajo desde el dominio público sin esa protección.</div>
     {% endif %}
+
+    <form class="sync-form" method="post" action="/admin/backfill">
+      <div class="field">
+        <label for="start_date">Traer desde</label>
+        <input id="start_date" type="date" name="start_date" max="{{ today }}" required {% if not admin_enabled %}disabled{% endif %}>
+      </div>
+      <div class="field">
+        <label for="end_date">Hasta</label>
+        <input id="end_date" type="date" name="end_date" value="{{ today }}" max="{{ today }}" required {% if not admin_enabled %}disabled{% endif %}>
+      </div>
+      <div class="field">
+        <label for="admin_token">Clave administrativa</label>
+        <input id="admin_token" type="password" name="admin_token" autocomplete="current-password" required {% if not admin_enabled %}disabled{% endif %}>
+      </div>
+      <div class="field">
+        <label class="check"><input type="checkbox" name="download_pdfs" value="1" {% if not admin_enabled %}disabled{% endif %}> Descargar también PDFs laborales</label>
+        <button type="submit" {% if not admin_enabled %}disabled{% endif %}>Encolar carga histórica</button>
+      </div>
+    </form>
+    <p class="sub">Máximo por solicitud: {{ max_backfill_days }} días. Para la primera carga conviene dejar los PDFs desmarcados y completar metadatos primero.</p>
   </section>
 
   <section class="panel">
@@ -134,7 +134,7 @@
         <dt>Por revisar</dt><dd>{{ last_sync.review_count }}</dd>
         <dt>PDFs disponibles</dt><dd>{{ last_sync.pdf_count }}</dd>
         <dt>Publicación más reciente</dt><dd>{{ last_sync.latest_publication_date or '—' }}</dd>
-        {% if last_sync.error %}<dt>Error</dt><dd><code>{{ last_sync.error }}</code></dd>{% endif %}
+        {% if last_sync.error %}<dt>Error</dt><dd><code>{{ last_sync.error }}</code>{% endif %}</dd>
       </dl>
     {% else %}
       <p class="sub">Todavía no se ha ejecutado ninguna sincronización.</p>
