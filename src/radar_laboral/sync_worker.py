@@ -41,7 +41,7 @@ def process_one_request() -> bool:
         end_date = date.fromisoformat(str(request_row["end_date"]))
         download_pdfs = bool(request_row["download_pdfs"])
         logging.info(
-            "Procesando carga histórica #%s: %s a %s; PDFs=%s",
+            "Procesando carga histórica #%s: %s a %s; PDFs=%s; solo faltantes",
             request_id,
             start_date,
             end_date,
@@ -51,10 +51,11 @@ def process_one_request() -> bool:
             start_date,
             end_date,
             download_pdfs=download_pdfs,
+            skip_complete_days=True,
         )
         finish_sync_request(request_id, status="success")
         logging.info(
-            "Carga histórica #%s completada: %s registros",
+            "Carga histórica #%s completada: %s registros procesados",
             request_id,
             len(records),
         )
