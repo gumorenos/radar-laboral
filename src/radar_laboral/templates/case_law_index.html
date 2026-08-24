@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jurisprudencia · Radar Laboral Perú</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
+    main { max-width: 1200px; margin: 0 auto; padding: 32px 20px; }
+    .header { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: baseline; }
+    .nav { display: flex; gap: 14px; flex-wrap: wrap; }
+    .muted { color: #666; }
+    form { margin: 24px 0; }
+    .search-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    input, select, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; }
+    .search-input { flex: 1; min-width: 280px; }
+    button { background: #222; color: white; cursor: pointer; }
+    details { margin-top: 12px; border: 1px solid #ddd; border-radius: 10px; background: white; }
+    summary { cursor: pointer; padding: 11px 13px; font-weight: 600; }
+    .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; padding: 4px 13px 14px; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 12px; color: #666; font-weight: 600; }
+    .field select, .field input { width: 100%; box-sizing: border-box; }
+    .table-wrap { overflow-x: auto; background: white; border: 1px solid #e5e5e5; border-radius: 10px; }
+    table { border-collapse: collapse; width: 100%; min-width: 900px; }
+    th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
+    th { font-size: 13px; color: #555; background: #fafafa; }
+    td { font-size: 14px; }
+    .empty { padding: 36px; text-align: center; color: #666; }
+    .pagination { display: flex; justify-content: space-between; gap: 16px; margin-top: 14px; }
+    .disabled { color: #aaa; }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="header">
+    <div>
+      <h1>Jurisprudencia laboral</h1>
+      <p class="muted">Pronunciamientos oficiales almacenados separadamente de las normas.</p>
+    </div>
+    <nav class="nav"><a href="/">Normas</a><a href="/status">Estado</a></nav>
+  </div>
+
+  {% set advanced_active = filters.court or filters.document_type or filters.topic or filters.binding_level or filters.date_from or filters.date_to %}
+  <form method="get">
+    <div class="search-row">
+      <input class="search-input" type="search" name="q" value="{{ query }}" placeholder="Buscar por expediente, número, tribunal, tema, título o sumilla…">
+      <button type="submit">Buscar</button>
+      <a href="/jurisprudencia">Limpiar</a>
+    </div>
+    <details {% if advanced_active %}open{% endif %}>
+      <summary>Filtros avanzados{% if advanced_active %} · activos{% endif %}</summary>
+      <div class="filters">
+        <div class="field"><label for="court">Órgano / tribunal</label><select id="court" name="court"><option value="">Todos</option>{% for item in options.courts %}<option value="{{ item }}" {% if item == filters.court %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="document_type">Tipo de pronunciamiento</label><select id="document_type" name="document_type"><option value="">Todos</option>{% for item in options.document_types %}<option value="{{ item }}" {% if item == filters.document_type %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="topic">Tema</label><select id="topic" name="topic"><option value="">Todos</option>{% for item in options.topics %}<option value="{{ item }}" {% if item == filters.topic %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="binding_level">Fuerza / alcance registrado</label><select id="binding_level" name="binding_level"><option value="">Todos</option>{% for item in options.binding_levels %}<option value="{{ item }}" {% if item == filters.binding_level %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="date_from">Desde</label><input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}"></div>
+        <div class="field"><label for="date_to">Hasta</label><input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}"></div>
+      </div>
+    </details>
+  </form>
+
+  <div class="table-wrap">
+    {% if rows %}
+      <table>
+        <thead><tr><th>Fecha</th><th>Órgano</th><th>Pronunciamiento</th><th>Título / sumilla</th><th>Tema</th><th>Fuerza / alcance</th></tr></thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.decision_date or row.publication_date or '—' }}</td>
+            <td>{{ row.court }}</td>
+            <td>{{ row.document_type or '—' }}<br><a href="/jurisprudencia/{{ row.id }}"><strong>{{ row.number or row.docket_number or 'Ver ficha' }}</strong></a></td>
+            <td><a href="/jurisprudencia/{{ row.id }}"><strong>{{ row.title }}</strong></a>{% if row.summary %}<br><span class="muted">{{ row.summary }}</span>{% endif %}</td>
+            <td>{{ row.topic or '—' }}</td>
+            <td>{{ row.binding_level or 'No determinado' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">No hay jurisprudencia que coincida con la búsqueda. Si el repositorio aún está vacío, los collectors jurisprudenciales se incorporarán en una etapa posterior.</div>
+    {% endif %}
+  </div>
+
+  {% if pagination.has_previous or pagination.has_next %}
+    <nav class="pagination" aria-label="Paginación">
+      {% if pagination.has_previous %}<a href="{{ pagination.previous_url }}">← Anterior</a>{% else %}<span class="disabled">← Anterior</span>{% endif %}
+      <span>Página {{ pagination.page }}</span>
+      {% if pagination.has_next %}<a href="{{ pagination.next_url }}">Siguiente →</a>{% else %}<span class="disabled">Siguiente →</span>{% endif %}
+    </nav>
+  {% endif %}
+</main>
+</body>
+</html>
