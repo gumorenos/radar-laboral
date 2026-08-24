@@ -13,7 +13,7 @@ from .db import (
     get_norm,
     init_db,
     latest_sync_run,
-    list_sources,
+    list_norm_filter_options,
     norm_stats,
     search_norms,
 )
@@ -26,16 +26,24 @@ def create_app() -> Flask:
     @app.get("/")
     def index():
         query = request.args.get("q", "").strip()
-        source = request.args.get("source", "").strip()
         relevance = request.args.get("relevance", "relevant").strip()
-        rows = search_norms(query=query, source=source, relevance=relevance)
+        filters = {
+            "source": request.args.get("source", "").strip(),
+            "document_type": request.args.get("document_type", "").strip(),
+            "issuer": request.args.get("issuer", "").strip(),
+            "topic": request.args.get("topic", "").strip(),
+            "edition": request.args.get("edition", "").strip(),
+            "date_from": request.args.get("date_from", "").strip(),
+            "date_to": request.args.get("date_to", "").strip(),
+        }
+        rows = search_norms(query=query, relevance=relevance, **filters)
         return render_template(
             "index.html",
             rows=rows,
             query=query,
-            source=source,
             relevance=relevance,
-            sources=list_sources(),
+            filters=filters,
+            options=list_norm_filter_options(),
         )
 
     @app.get("/norm/<norm_id>/pdf")

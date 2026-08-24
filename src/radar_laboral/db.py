@@ -42,6 +42,10 @@ CREATE INDEX IF NOT EXISTS idx_norms_source
     ON norms(source);
 CREATE INDEX IF NOT EXISTS idx_norms_topic
     ON norms(topic);
+CREATE INDEX IF NOT EXISTS idx_norms_document_type
+    ON norms(document_type);
+CREATE INDEX IF NOT EXISTS idx_norms_issuer
+    ON norms(issuer);
 
 CREATE TABLE IF NOT EXISTS case_law (
     id TEXT PRIMARY KEY,
@@ -145,7 +149,6 @@ NORM_COLUMNS = (
     "updated_at",
 )
 
-FTS_COLUMNS = ("title", "number", "summary", "issuer", "topic")
 FTS_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 FTS_TABLE_SQL = """
 CREATE VIRTUAL TABLE norms_fts USING fts5(
@@ -351,14 +354,40 @@ def get_norm(norm_id: str):
         return conn.execute("SELECT * FROM norms WHERE id = ?", (norm_id,)).fetchone()
 
 
-def _search_filters(source: str, relevance: str, *, alias: str = "") -> tuple[list[str], list[str | int]]:
+def _search_filters(
+    source: str,
+    relevance: str,
+    *,
+    document_type: str = "",
+    issuer: str = "",
+    topic: str = "",
+    edition: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    alias: str = "",
+) -> tuple[list[str], list[str | int]]:
     prefix = f"{alias}." if alias else ""
     clauses: list[str] = []
     params: list[str | int] = []
 
-    if source:
-        clauses.append(f"{prefix}source = ?")
-        params.append(source)
+    exact_filters = (
+        ("source", source),
+        ("document_type", document_type),
+        ("issuer", issuer),
+        ("topic", topic),
+        ("edition", edition),
+    )
+    for column, value in exact_filters:
+        if value:
+            clauses.append(f"{prefix}{column} = ?")
+            params.append(value)
+
+    if date_from:
+        clauses.append(f"{prefix}publication_date >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append(f"{prefix}publication_date <= ?")
+        params.append(date_to)
 
     if relevance == "tracked":
         clauses.append(f"{prefix}labor_relevance IN ('relevant', 'review')")
@@ -375,8 +404,25 @@ def _search_norms_fts(
     source: str,
     relevance: str,
     limit: int,
+    *,
+    document_type: str = "",
+    issuer: str = "",
+    topic: str = "",
+    edition: str = "",
+    date_from: str = "",
+    date_to: str = "",
 ):
-    clauses, params = _search_filters(source, relevance, alias="n")
+    clauses, params = _search_filters(
+        source,
+        relevance,
+        document_type=document_type,
+        issuer=issuer,
+        topic=topic,
+        edition=edition,
+        date_from=date_from,
+        date_to=date_to,
+        alias="n",
+    )
     clauses.insert(0, "norms_fts MATCH ?")
     params.insert(0, fts_query)
     where = " AND ".join(clauses)
@@ -402,8 +448,24 @@ def _search_norms_like(
     source: str,
     relevance: str,
     limit: int,
+    *,
+    document_type: str = "",
+    issuer: str = "",
+    topic: str = "",
+    edition: str = "",
+    date_from: str = "",
+    date_to: str = "",
 ):
-    clauses, params = _search_filters(source, relevance)
+    clauses, params = _search_filters(
+        source,
+        relevance,
+        document_type=document_type,
+        issuer=issuer,
+        topic=topic,
+        edition=edition,
+        date_from=date_from,
+        date_to=date_to,
+    )
     if query:
         like = f"%{query}%"
         clauses.insert(
@@ -431,25 +493,72 @@ def search_norms(
     source: str = "",
     relevance: str = "relevant",
     limit: int = 200,
+    *,
+    document_type: str = "",
+    issuer: str = "",
+    topic: str = "",
+    edition: str = "",
+    date_from: str = "",
+    date_to: str = "",
 ):
     safe_limit = max(1, min(int(limit), 1000))
     fts_query = _fts_query(query) if query else None
+    filter_args = {
+        "document_type": document_type,
+        "issuer": issuer,
+        "topic": topic,
+        "edition": edition,
+        "date_from": date_from,
+        "date_to": date_to,
+    }
 
     with connect() as conn:
         if fts_query and _fts_available(conn):
             try:
-                return _search_norms_fts(conn, fts_query, source, relevance, safe_limit)
+                return _search_norms_fts(
+                    conn,
+                    fts_query,
+                    source,
+                    relevance,
+                    safe_limit,
+                    **filter_args,
+                )
             except sqlite3.OperationalError:
                 pass
-        return _search_norms_like(conn, query, source, relevance, safe_limit)
+        return _search_norms_like(
+            conn,
+            query,
+            source,
+            relevance,
+            safe_limit,
+            **filter_args,
+        )
+
+
+def _distinct_values(conn: sqlite3.Connection, column: str) -> list[str]:
+    allowed = {"source", "document_type", "issuer", "topic", "edition"}
+    if column not in allowed:
+        raise ValueError(f"Campo de filtro no permitido: {column}")
+    rows = conn.execute(
+        f"SELECT DISTINCT {column} FROM norms "
+        f"WHERE {column} IS NOT NULL AND {column} <> '' ORDER BY {column}"
+    ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def list_norm_filter_options() -> dict[str, list[str]]:
+    with connect() as conn:
+        return {
+            "sources": _distinct_values(conn, "source"),
+            "document_types": _distinct_values(conn, "document_type"),
+            "issuers": _distinct_values(conn, "issuer"),
+            "topics": _distinct_values(conn, "topic"),
+            "editions": _distinct_values(conn, "edition"),
+        }
 
 
 def list_sources() -> list[str]:
-    with connect() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT source FROM norms WHERE source <> '' ORDER BY source"
-        ).fetchall()
-    return [row[0] for row in rows]
+    return list_norm_filter_options()["sources"]
 
 
 def start_sync_run(source: str) -> int:
