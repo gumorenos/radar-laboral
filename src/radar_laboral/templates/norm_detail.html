@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ norm.document_type or 'Norma' }} {{ norm.number or '' }} · Radar Laboral Perú</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; }
+    a { color: inherit; }
+    .topbar { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+    .eyebrow { color: #666; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+    h1 { margin: 8px 0 6px; line-height: 1.2; }
+    .title { font-size: 20px; margin: 0 0 20px; color: #444; }
+    .card { background: white; border: 1px solid #e4e4e7; border-radius: 12px; padding: 20px; margin: 16px 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px 22px; }
+    .field dt { font-size: 12px; color: #666; font-weight: 700; margin-bottom: 4px; }
+    .field dd { margin: 0; overflow-wrap: anywhere; }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 12px; background: #eee; }
+    .badge-relevant { background: #dcfce7; }
+    .badge-review { background: #fef3c7; }
+    .badge-not_labor { background: #f1f5f9; color: #64748b; }
+    .badge-extraordinary { background: #e0e7ff; }
+    .muted { color: #666; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    .button { display: inline-block; padding: 9px 12px; border: 1px solid #ccc; border-radius: 8px; text-decoration: none; background: white; }
+    .button-primary { background: #222; color: white; border-color: #222; }
+    .relation-list { list-style: none; margin: 0; padding: 0; }
+    .relation-list li { padding: 13px 0; border-bottom: 1px solid #eee; }
+    .relation-list li:last-child { border-bottom: 0; }
+    .relation-meta { color: #666; font-size: 13px; margin-top: 4px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="topbar">
+    <a href="/">← Volver al buscador</a>
+    <a href="/status">Estado de sincronización</a>
+  </div>
+
+  <div class="eyebrow">{{ norm.source }}{% if norm.edition == 'extraordinary' %} · Edición extraordinaria{% endif %}</div>
+  <h1>{{ norm.document_type or 'Norma' }}{% if norm.number %} {{ norm.number }}{% endif %}</h1>
+  <p class="title">{{ norm.title }}</p>
+
+  <section class="card">
+    <h2>Datos de la norma</h2>
+    <dl class="grid">
+      <div class="field"><dt>Fecha de publicación</dt><dd>{{ norm.publication_date or '—' }}</dd></div>
+      <div class="field"><dt>Fecha de vigencia</dt><dd>{{ norm.effective_date or '—' }}</dd></div>
+      <div class="field"><dt>Entidad emisora</dt><dd>{{ norm.issuer or '—' }}</dd></div>
+      <div class="field"><dt>Tema</dt><dd>{{ norm.topic or '—' }}</dd></div>
+      <div class="field"><dt>Estado</dt><dd>{{ norm.status or '—' }}</dd></div>
+      <div class="field"><dt>Edición</dt><dd>{% if norm.edition == 'extraordinary' %}<span class="badge badge-extraordinary">Extraordinaria</span>{% elif norm.edition == 'regular' %}Regular{% else %}—{% endif %}</dd></div>
+      <div class="field">
+        <dt>Relevancia laboral</dt>
+        <dd>
+          {% if norm.labor_relevance == 'relevant' %}<span class="badge badge-relevant">Relevante</span>
+          {% elif norm.labor_relevance == 'review' %}<span class="badge badge-review">Revisar</span>
+          {% elif norm.labor_relevance == 'not_labor' %}<span class="badge badge-not_labor">No laboral</span>
+          {% else %}—{% endif %}
+        </dd>
+      </div>
+      <div class="field"><dt>Versión del clasificador</dt><dd>{{ norm.classification_version or '—' }}</dd></div>
+    </dl>
+
+    {% if norm.summary %}
+      <h3>Sumilla / resumen</h3>
+      <p>{{ norm.summary }}</p>
+    {% endif %}
+
+    {% if norm.relevance_reason %}
+      <h3>Motivo de clasificación</h3>
+      <p>{{ norm.relevance_reason }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Fuente y trazabilidad</h2>
+    <dl class="grid">
+      <div class="field"><dt>Fuente</dt><dd>{{ norm.source }}</dd></div>
+      <div class="field"><dt>Capturado</dt><dd>{{ norm.captured_at or '—' }}</dd></div>
+      <div class="field"><dt>Actualizado</dt><dd>{{ norm.updated_at or '—' }}</dd></div>
+      <div class="field"><dt>SHA-256 del PDF local</dt><dd>{% if norm.sha256 %}<code>{{ norm.sha256 }}</code>{% else %}—{% endif %}</dd></div>
+    </dl>
+    <div class="actions">
+      <a class="button button-primary" href="{{ norm.official_url }}" target="_blank" rel="noreferrer">Abrir fuente oficial</a>
+      {% if norm.pdf_url or norm.pdf_path %}<a class="button" href="/norm/{{ norm.id }}/pdf" target="_blank">Abrir PDF</a>{% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Normas relacionadas</h2>
+    {% if related_norms %}
+      <ul class="relation-list">
+        {% for item in related_norms %}
+          <li>
+            <a href="/norm/{{ item.id }}"><strong>{{ item.document_type or 'Norma' }} {{ item.number or '' }}</strong> · {{ item.title }}</a>
+            <div class="relation-meta">
+              {{ relation_labels.get(item.relation_type, item.relation_type) }} · {{ 'desde esta norma' if item.relation_direction == 'outgoing' else 'hacia esta norma' }}
+              {% if item.note %} · {{ item.note }}{% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No hay relaciones con otras normas registradas todavía.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Jurisprudencia relacionada</h2>
+    {% if related_case_law %}
+      <ul class="relation-list">
+        {% for item in related_case_law %}
+          <li>
+            <strong>{{ item.court }}</strong> · {{ item.document_type or 'Pronunciamiento' }} {{ item.number or item.docket_number or '' }}<br>
+            {{ item.title }}
+            <div class="relation-meta">
+              {{ relation_labels.get(item.relation_type, item.relation_type) }} · {{ 'desde esta norma' if item.relation_direction == 'outgoing' else 'hacia esta norma' }}
+              {% if item.binding_level %} · Fuerza/alcance: {{ item.binding_level }}{% endif %}
+              {% if item.note %} · {{ item.note }}{% endif %}
+            </div>
+            <div class="actions">
+              <a class="button" href="{{ item.official_url }}" target="_blank" rel="noreferrer">Fuente oficial</a>
+              {% if item.pdf_url %}<a class="button" href="{{ item.pdf_url }}" target="_blank" rel="noreferrer">PDF oficial</a>{% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Todavía no hay jurisprudencia relacionada registrada. Esta sección se poblará cuando se incorporen los collectors jurisprudenciales.</p>
+    {% endif %}
+  </section>
+</main>
+</body>
+</html>
