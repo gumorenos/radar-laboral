@@ -1,6 +1,6 @@
 # Radar Laboral Perú
 
-Repositorio ligero y autocontenido para **capturar, conservar y consultar normativa laboral peruana**, con trazabilidad hacia la fuente oficial y una evolución prevista hacia jurisprudencia y conceptos laborales.
+Repositorio ligero y autocontenido para **capturar, conservar y consultar normativa laboral peruana y jurisprudencia laboral**, con trazabilidad hacia la fuente oficial.
 
 El objetivo del proyecto no es reemplazar a El Peruano, MTPE, SUNAFIL, el Tribunal Constitucional, el Poder Judicial u otras fuentes oficiales. La idea es mantener un repositorio local consultable con metadatos y copias de los documentos oficiales, de modo que cada instalación pueda investigar sin depender de un chat ni de inteligencia artificial.
 
@@ -11,7 +11,7 @@ El objetivo del proyecto no es reemplazar a El Peruano, MTPE, SUNAFIL, el Tribun
 - **Ligero:** una aplicación Python, SQLite y una interfaz web simple.
 - **Portable:** el mismo código debe correr en Linux, Docker y, más adelante, como ejecutable portable para Windows.
 - **Reproducible:** los catálogos pueden exportarse/versionarse como texto; la base SQLite y los PDF se reconstruyen o descargan localmente.
-- **Extensible:** jurisprudencia, conceptos, IA, búsqueda semántica y resúmenes pueden añadirse por capas sin convertirse en la fuente de verdad.
+- **Extensible:** conceptos, IA, búsqueda semántica y resúmenes pueden añadirse por capas sin convertirse en la fuente de verdad.
 
 ## Capas de contenido
 
@@ -23,21 +23,20 @@ Radar Laboral separa tres tipos de información:
 
 Ver [`docs/content-model.md`](docs/content-model.md) para el diseño de estas relaciones.
 
-## MVP
-
-La primera versión se concentra en normas y cubre:
+## Funcionalidad actual
 
 1. Catálogo SQLite con metadatos normalizados.
-2. Interfaz web para buscar y filtrar normas.
-3. Cache local de los PDF oficiales con SHA-256.
-4. Colector determinístico de El Peruano.
-5. Clasificación determinística de relevancia laboral.
-6. Sincronización periódica, deduplicación y registro de ejecuciones.
-7. Backfill histórico determinístico por rango de fechas.
-8. Docker para servidor Linux.
-9. Preparación para empaquetado portable en Windows.
-
-La jurisprudencia y la biblioteca de conceptos están contempladas en el modelo desde el inicio, pero se incorporarán después de estabilizar la captura de normativa.
+2. Interfaz web para buscar, filtrar y paginar normas.
+3. Biblioteca independiente de jurisprudencia con búsqueda, filtros, paginación y fichas.
+4. Cache local de PDF oficiales con SHA-256.
+5. Collector determinístico de El Peruano por fecha, incluyendo edición regular y extraordinaria.
+6. Clasificación determinística de relevancia laboral.
+7. Sincronización periódica, deduplicación y registro de ejecuciones.
+8. Backfill histórico de El Peruano por rango de fechas.
+9. Collector de Resoluciones de Sala Plena del Tribunal de Fiscalización Laboral de SUNAFIL.
+10. Relaciones auditables entre normas y jurisprudencia.
+11. Docker para servidor Linux.
+12. Preparación para empaquetado portable en Windows.
 
 ## Arquitectura
 
@@ -45,7 +44,7 @@ La jurisprudencia y la biblioteca de conceptos están contempladas en el modelo 
 Fuentes oficiales
       |
       v
-  collectors  ---> catálogo JSONL
+  collectors  ---> catálogos JSONL
       |                 |
       v                 v
  storage/pdfs/       SQLite local
@@ -96,7 +95,7 @@ radar-laboral-sync-daemon
 
 Por defecto sincroniza cada 6 horas. Puede cambiarse con `RADAR_SYNC_INTERVAL_SECONDS`; el programa impone un mínimo de una hora para no consultar innecesariamente la fuente oficial.
 
-## Carga histórica
+## Carga histórica de El Peruano
 
 El backfill histórico reutiliza exactamente el mismo collector por fecha que la sincronización diaria. Esto evita tener dos parsers distintos para la misma fuente y conserva las mismas reglas de integridad para `NL` y `EX`.
 
@@ -114,9 +113,21 @@ radar-laboral-backfill --from 2026-01-01 --to 2026-01-31
 
 El rango es inclusivo, se procesa día por día y el `upsert` permite repetir una carga sin duplicar registros por OP. Los metadatos de edición (`regular` / `extraordinary`) se conservan en el catálogo JSONL.
 
-Para históricos grandes conviene trabajar por meses o trimestres. Si una fecha falla por integridad, los días anteriores ya almacenados permanecen disponibles y el rango puede repetirse después de corregir la causa.
+La prueba de integración conocida para el **1 de agosto de 2026** es 124 dispositivos `NL` + 16 `EX` = **140 dispositivos**.
 
-La prueba de integración conocida para el **1 de agosto de 2026** es 124 dispositivos `NL` + 16 `EX` = **140 dispositivos**. Este gate debe validarse en una máquina con acceso real a El Peruano antes de considerar estable el backfill.
+## SUNAFIL — Tribunal de Fiscalización Laboral
+
+La biblioteca de jurisprudencia puede alimentarse con las Resoluciones de Sala Plena publicadas por SUNAFIL:
+
+```bash
+radar-laboral-sync-tfl --all-pages --no-pdf
+```
+
+El modo normal procesa solo la primera página del listado para reducir tráfico. `--all-pages` recorre el histórico disponible y `--refresh-details` vuelve a consultar detalles ya almacenados.
+
+Los registros usan IDs estables derivados del recurso oficial de `gob.pe`, por ejemplo `sunafil-tfl:6556395`. El collector conserva número, fecha, sumilla oficial, fuente, PDF y SHA-256 cuando existe copia local. `binding_level` solo se informa cuando el texto oficial declara expresamente una fuerza o alcance obligatorio; el sistema no lo infiere por el tipo de resolución.
+
+El gate live de creación del collector validó 53 resoluciones disponibles en ese momento y la Resolución de Sala Plena `001-2025-SUNAFIL-TFL`, incluida su sumilla completa, su declaración de precedente administrativo de observancia obligatoria y su PDF oficial. Ver [`docs/QA_TFL.md`](docs/QA_TFL.md).
 
 ## Docker
 
@@ -129,14 +140,16 @@ docker compose up -d --build
 Compose levanta dos procesos basados en la misma imagen:
 
 - `radar-laboral`: interfaz web;
-- `radar-laboral-sync`: sincronizador periódico.
+- `radar-laboral-sync`: sincronizador periódico de El Peruano.
 
 Ambos comparten `./storage:/data`. Allí quedan de forma persistente:
 
 ```text
 storage/
 ├── radar_laboral.db
-├── catalog/norms.jsonl
+├── catalog/
+│   ├── norms.jsonl
+│   └── case_law.jsonl
 └── pdfs/
 ```
 
@@ -156,13 +169,7 @@ No es necesario abrir el puerto 8080 en el router ni exponerlo directamente a In
 - `/status`: resumen visual de registros, PDFs y última sincronización.
 - `/api/status`: la misma información en JSON.
 - [`docs/QA_PENDING.md`](docs/QA_PENDING.md): pruebas que requieren Raspberry, fuente real o Cloudflare.
-
-También puede revisarse desde consola:
-
-```bash
-docker compose ps
-docker compose logs --tail=100 radar-laboral-sync
-```
+- [`docs/QA_TFL.md`](docs/QA_TFL.md): QA del collector SUNAFIL TFL.
 
 ## Actualizar una instalación existente
 
@@ -179,4 +186,4 @@ Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación. Los PDF
 
 ## Estado del proyecto
 
-Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, collector determinístico por fecha de El Peruano, clasificación laboral, cache verificable de PDFs, sincronización automática, backfill histórico y estructura futura para jurisprudencia y conceptos laborales. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
+Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, collectors determinísticos de El Peruano y SUNAFIL TFL, clasificación laboral, cache verificable de PDFs, sincronización automática de El Peruano, backfill histórico, biblioteca de jurisprudencia y relaciones entre documentos. Las siguientes fuentes y funcionalidades se incorporarán por etapas.

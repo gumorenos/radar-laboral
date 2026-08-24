@@ -23,6 +23,7 @@ radar-laboral = "radar_laboral.app:main"
 radar-laboral-sync = "radar_laboral.collectors.el_peruano_search:main"
 radar-laboral-sync-daemon = "radar_laboral.sync_daemon:main"
 radar-laboral-backfill = "radar_laboral.collectors.el_peruano_history:main"
+radar-laboral-sync-tfl = "radar_laboral.collectors.sunafil_tfl:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

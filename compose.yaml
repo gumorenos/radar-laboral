@@ -1,6 +1,7 @@
 x-radar-environment: &radar-environment
   RADAR_DATA_DIR: /data
   RADAR_CATALOG_PATH: /data/catalog/norms.jsonl
+  RADAR_CASE_LAW_CATALOG_PATH: /data/catalog/case_law.jsonl
 
 services:
   radar-laboral:
