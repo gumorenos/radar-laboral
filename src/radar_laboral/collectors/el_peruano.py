@@ -20,6 +20,7 @@ from radar_laboral.db import (
     start_sync_run,
     upsert_norm,
 )
+from radar_laboral.legal_text import extract_pdf_excerpt
 
 SOURCE = "El Peruano"
 BASE_URL = "https://diariooficial.elperuano.pe"
@@ -302,6 +303,21 @@ def _restore_cached_pdf(record: dict[str, str | None], destination: Path, relati
     return False
 
 
+def _attach_pdf_excerpt(record: dict[str, str | None]) -> None:
+    pdf_path = record.get("pdf_path")
+    if not pdf_path:
+        return
+    path = Path(pdf_path)
+    if not path.is_absolute():
+        path = data_dir() / path
+    try:
+        excerpt = extract_pdf_excerpt(path)
+    except Exception:
+        return
+    if excerpt:
+        record["classification_text_excerpt"] = excerpt
+
+
 def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
     viewer_url = record.get("pdf_url")
     if not viewer_url:
@@ -313,12 +329,14 @@ def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
     destination = data_dir() / relative_path
 
     if _restore_cached_pdf(record, destination, relative_path):
+        _attach_pdf_excerpt(record)
         return
 
     direct = _download_if_pdf(session, viewer_url, destination)
     if direct:
         record["pdf_url"], record["sha256"] = direct
         record["pdf_path"] = relative_path.as_posix()
+        _attach_pdf_excerpt(record)
         return
 
     response = session.get(viewer_url, timeout=30)
@@ -330,6 +348,7 @@ def cache_pdf(session: requests.Session, record: dict[str, str | None]) -> None:
         if downloaded:
             record["pdf_url"], record["sha256"] = downloaded
             record["pdf_path"] = relative_path.as_posix()
+            _attach_pdf_excerpt(record)
             return
 
 
