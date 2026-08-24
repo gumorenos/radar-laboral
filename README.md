@@ -33,8 +33,9 @@ La primera versión se concentra en normas y cubre:
 4. Colector determinístico de El Peruano.
 5. Clasificación determinística de relevancia laboral.
 6. Sincronización periódica, deduplicación y registro de ejecuciones.
-7. Docker para servidor Linux.
-8. Preparación para empaquetado portable en Windows.
+7. Backfill histórico determinístico por rango de fechas.
+8. Docker para servidor Linux.
+9. Preparación para empaquetado portable en Windows.
 
 La jurisprudencia y la biblioteca de conceptos están contempladas en el modelo desde el inicio, pero se incorporarán después de estabilizar la captura de normativa.
 
@@ -75,15 +76,17 @@ Ejecución manual:
 radar-laboral-sync
 ```
 
-El comando consulta la publicación de Normas Legales, normaliza los dispositivos encontrados, clasifica su relevancia laboral, hace `upsert` en SQLite y actualiza el catálogo JSONL.
+El comando consulta el buscador oficial de El Peruano para la fecha local de Lima, por separado para Normas Legales (`NL`) y Edición Extraordinaria (`EX`). Normaliza los dispositivos, exige que el total informado coincida con los OP reconocidos, clasifica su relevancia laboral, hace `upsert` en SQLite y actualiza el catálogo JSONL.
 
-Cuando puede resolver el documento PDF real desde la fuente oficial, guarda una copia en `storage/pdfs/elperuano/<año>/` y calcula su SHA-256. Una ejecución posterior reutiliza el archivo si su hash continúa siendo válido. Si el archivo cambió, se descarta y vuelve a obtenerse desde la fuente oficial.
+Un día que El Peruano marca explícitamente como `No hay resultados para mostrar` se considera una sincronización válida con cero novedades. En cambio, HTML ambiguo, paginación incompleta o un total que no coincide siguen siendo errores visibles.
 
-Para comprobar solo metadatos sin intentar descargar PDF:
+Para consultar una fecha concreta o comprobar solo metadatos:
 
 ```bash
-radar-laboral-sync --no-pdf
+radar-laboral-sync --date 2026-08-23 --no-pdf
 ```
+
+Cuando puede resolver el documento PDF real desde la fuente oficial, guarda una copia en `storage/pdfs/elperuano/<año>/` y calcula su SHA-256. Solo se intenta cachear PDF para registros clasificados como `relevant` o `review`. Una ejecución posterior reutiliza el archivo si su hash continúa siendo válido.
 
 También existe un proceso periódico:
 
@@ -92,6 +95,28 @@ radar-laboral-sync-daemon
 ```
 
 Por defecto sincroniza cada 6 horas. Puede cambiarse con `RADAR_SYNC_INTERVAL_SECONDS`; el programa impone un mínimo de una hora para no consultar innecesariamente la fuente oficial.
+
+## Carga histórica
+
+El backfill histórico reutiliza exactamente el mismo collector por fecha que la sincronización diaria. Esto evita tener dos parsers distintos para la misma fuente y conserva las mismas reglas de integridad para `NL` y `EX`.
+
+Ejemplo, primero solo metadatos:
+
+```bash
+radar-laboral-backfill --from 2026-01-01 --to 2026-01-31 --no-pdf
+```
+
+Luego, si se desea completar las copias locales de documentos laborales del mismo rango:
+
+```bash
+radar-laboral-backfill --from 2026-01-01 --to 2026-01-31
+```
+
+El rango es inclusivo, se procesa día por día y el `upsert` permite repetir una carga sin duplicar registros por OP. Los metadatos de edición (`regular` / `extraordinary`) se conservan en el catálogo JSONL.
+
+Para históricos grandes conviene trabajar por meses o trimestres. Si una fecha falla por integridad, los días anteriores ya almacenados permanecen disponibles y el rango puede repetirse después de corregir la causa.
+
+La prueba de integración conocida para el **1 de agosto de 2026** es 124 dispositivos `NL` + 16 `EX` = **140 dispositivos**. Este gate debe validarse en una máquina con acceso real a El Peruano antes de considerar estable el backfill.
 
 ## Docker
 
@@ -130,6 +155,7 @@ No es necesario abrir el puerto 8080 en el router ni exponerlo directamente a In
 - `/healthz`: healthcheck mínimo para Docker.
 - `/status`: resumen visual de registros, PDFs y última sincronización.
 - `/api/status`: la misma información en JSON.
+- [`docs/QA_PENDING.md`](docs/QA_PENDING.md): pruebas que requieren Raspberry, fuente real o Cloudflare.
 
 También puede revisarse desde consola:
 
@@ -153,4 +179,4 @@ Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación. Los PDF
 
 ## Estado del proyecto
 
-Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, colector de El Peruano, clasificación laboral, cache verificable de PDFs, sincronización automática y estructura futura para jurisprudencia y conceptos laborales. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
+Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, collector determinístico por fecha de El Peruano, clasificación laboral, cache verificable de PDFs, sincronización automática, backfill histórico y estructura futura para jurisprudencia y conceptos laborales. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
