@@ -22,7 +22,7 @@ class SyncWorkerTests(unittest.TestCase):
         self.tmp.cleanup()
 
     @patch("radar_laboral.sync_worker.backfill")
-    def test_processes_backfill_request(self, backfill_mock) -> None:
+    def test_processes_backfill_request_as_missing_only(self, backfill_mock) -> None:
         backfill_mock.return_value = [{"id": "a"}, {"id": "b"}]
         request_id, _ = enqueue_backfill_request(
             "2026-07-01", "2026-07-03", download_pdfs=True
@@ -33,6 +33,7 @@ class SyncWorkerTests(unittest.TestCase):
             date(2026, 7, 1),
             date(2026, 7, 3),
             download_pdfs=True,
+            skip_complete_days=True,
         )
         row = list_sync_requests(1)[0]
         self.assertEqual(row["id"], request_id)
