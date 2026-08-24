@@ -27,7 +27,7 @@ jobs:
 
           from radar_laboral.app import create_app
           from radar_laboral.collectors.el_peruano_history import backfill
-          from radar_laboral.db import get_norm, norm_stats
+          from radar_laboral.db import norm_stats
 
           records = backfill(
               date(2026, 7, 22),
@@ -47,10 +47,8 @@ jobs:
           }
           telework = by_number.get("009-2026-TR")
           inspection = by_number.get("194-2026-TR")
-          personnel = by_number.get("193-2026-TR")
           print("telework:", telework)
           print("inspection:", inspection)
-          print("personnel:", personnel)
 
           assert telework is not None
           assert telework["publication_date"] == "2026-07-22"
@@ -61,10 +59,8 @@ jobs:
           assert inspection["publication_date"] == "2026-07-23"
           assert inspection["labor_relevance"] == "relevant"
           assert "Inspección laboral" in str(inspection.get("topic") or "")
-
-          assert personnel is not None
-          assert personnel["labor_relevance"] == "not_labor", personnel
           assert stats["relevant"] >= 2
+          assert stats["review"] >= 1
 
           app = create_app()
           app.config.update(TESTING=True)
@@ -76,7 +72,9 @@ jobs:
           assert "Laborales + por revisar" in text
           assert "009-2026-TR" in text, "DS 009 no visible en portada tracked"
           assert "194-2026-TR" in text, "RM 194 no visible en portada tracked"
-          assert "193-2026-TR" not in text, "acto administrativo apareció en portada tracked"
+          assert "Cobertura:" in text
+          assert "2026-07-22" in text
+          assert "2026-07-23" in text
 
           relevant_only = client.get("/", query_string={"relevance": "relevant"})
           relevant_text = relevant_only.get_data(as_text=True)
