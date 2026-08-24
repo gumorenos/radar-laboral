@@ -16,14 +16,19 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e .
-      - name: Validate real El Peruano labor controls
+      - name: Inspect real El Peruano labor controls
         run: |
           python - <<'PY'
           from datetime import date
 
           import requests
+          from bs4 import BeautifulSoup, Tag
 
-          from radar_laboral.collectors.el_peruano_search import fetch_day
+          from radar_laboral.collectors.el_peruano_search import (
+              SEARCH_URL,
+              _search_params,
+              fetch_day,
+          )
           from radar_laboral.db import enrich_norm
 
           session = requests.Session()
@@ -32,42 +37,57 @@ jobs:
               "Accept-Language": "es-PE,es;q=0.9",
           })
 
-          raw = fetch_day(session, date(2026, 7, 22), page_delay_seconds=0)
-          records = [enrich_norm(item) for item in raw]
-          print("total records:", len(records))
-          counts = {}
-          for item in records:
-              key = item.get("labor_relevance")
-              counts[key] = counts.get(key, 0) + 1
-          print("classification counts:", counts)
-
           controls = {
-              "009-2026-TR": None,
-              "194-2026-TR": None,
+              date(2026, 7, 22): "009-2026-TR",
+              date(2026, 7, 23): "194-2026-TR",
           }
-          for item in records:
-              number = str(item.get("number") or "")
-              if number in controls:
-                  controls[number] = item
-                  print("CONTROL", number, item)
-              issuer = str(item.get("issuer") or "")
-              if "TRABAJO" in issuer.upper():
-                  print(
-                      "MTPE",
-                      number,
-                      item.get("document_type"),
-                      item.get("labor_relevance"),
-                      item.get("topic"),
-                      item.get("title"),
-                  )
+          parsed = {}
+          for day, wanted in controls.items():
+              raw = fetch_day(session, day, page_delay_seconds=0)
+              records = [enrich_norm(item) for item in raw]
+              print("DAY", day, "total", len(records))
+              for item in records:
+                  if str(item.get("number") or "") == wanted:
+                      parsed[wanted] = item
+                      print("CONTROL", wanted, item)
 
-          telework = controls["009-2026-TR"]
-          inspection = controls["194-2026-TR"]
-          assert telework is not None, "No se encontró DS 009-2026-TR en El Peruano 2026-07-22"
-          assert inspection is not None, "No se encontró RM 194-2026-TR en El Peruano 2026-07-22"
+              response = session.get(
+                  SEARCH_URL,
+                  params=_search_params(day, 0, "NL"),
+                  timeout=30,
+              )
+              response.raise_for_status()
+              soup = BeautifulSoup(response.text, "html.parser")
+              anchor = next(
+                  (a for a in soup.find_all("a") if wanted in a.get_text(" ", strip=True)),
+                  None,
+              )
+              print("ANCHOR", wanted, repr(anchor.get_text(" ", strip=True) if anchor else None))
+              if anchor:
+                  node: Tag | None = anchor
+                  for level in range(6):
+                      if node is None:
+                          break
+                      print(
+                          "ANCESTOR",
+                          wanted,
+                          level,
+                          node.name,
+                          node.get("class"),
+                          repr(node.get_text(" | ", strip=True)[:1800]),
+                      )
+                      parent = node.parent
+                      node = parent if isinstance(parent, Tag) else None
+                  print("PREVIOUS HEADINGS", wanted)
+                  for previous in anchor.find_all_previous(["h2", "h3", "h4", "strong"], limit=15):
+                      print(previous.name, previous.get("class"), repr(previous.get_text(" ", strip=True)))
+
+          telework = parsed.get("009-2026-TR")
+          inspection = parsed.get("194-2026-TR")
+          assert telework is not None, "No se encontró DS 009-2026-TR el 2026-07-22"
+          assert inspection is not None, "No se encontró RM 194-2026-TR el 2026-07-23"
           assert telework["labor_relevance"] == "relevant", telework
           assert "Teletrabajo" in str(telework.get("topic") or ""), telework
           assert inspection["labor_relevance"] == "relevant", inspection
           assert "Inspección laboral" in str(inspection.get("topic") or ""), inspection
-          assert counts.get("relevant", 0) >= 2, counts
           PY
