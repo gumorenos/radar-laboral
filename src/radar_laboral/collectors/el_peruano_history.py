@@ -8,7 +8,12 @@ from pathlib import Path
 import requests
 
 from radar_laboral.collectors.el_peruano import cache_pdf, default_catalog_path, merge_catalog
-from radar_laboral.collectors.el_peruano_search import TRACKED_RELEVANCE, fetch_day
+from radar_laboral.collectors.el_peruano_search import (
+    TRACKED_RELEVANCE,
+    fetch_day,
+    local_today,
+)
+from radar_laboral.coverage import mark_coverage_day
 from radar_laboral.db import (
     enrich_norm,
     finish_sync_run,
@@ -74,6 +79,18 @@ def backfill(
 
             if day_records:
                 merge_catalog(day_records, catalog_path)
+
+            mark_coverage_day(
+                current_day,
+                record_count=len(day_records),
+                relevant_count=sum(
+                    1 for item in day_records if item.get("labor_relevance") == "relevant"
+                ),
+                review_count=sum(
+                    1 for item in day_records if item.get("labor_relevance") == "review"
+                ),
+                is_complete=current_day < local_today(),
+            )
 
             if day_delay_seconds > 0 and current_day < end_date:
                 time.sleep(day_delay_seconds)
