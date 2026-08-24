@@ -1,0 +1,73 @@
+name: live-labor-filter-qa
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  live-labor-filter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e .
+      - name: Validate real El Peruano labor controls
+        run: |
+          python - <<'PY'
+          from datetime import date
+
+          import requests
+
+          from radar_laboral.collectors.el_peruano_search import fetch_day
+          from radar_laboral.db import enrich_norm
+
+          session = requests.Session()
+          session.headers.update({
+              "User-Agent": "radar-laboral-live-qa/0.1 (+https://github.com/gumorenos/radar-laboral)",
+              "Accept-Language": "es-PE,es;q=0.9",
+          })
+
+          raw = fetch_day(session, date(2026, 7, 22), page_delay_seconds=0)
+          records = [enrich_norm(item) for item in raw]
+          print("total records:", len(records))
+          counts = {}
+          for item in records:
+              key = item.get("labor_relevance")
+              counts[key] = counts.get(key, 0) + 1
+          print("classification counts:", counts)
+
+          controls = {
+              "009-2026-TR": None,
+              "194-2026-TR": None,
+          }
+          for item in records:
+              number = str(item.get("number") or "")
+              if number in controls:
+                  controls[number] = item
+                  print("CONTROL", number, item)
+              issuer = str(item.get("issuer") or "")
+              if "TRABAJO" in issuer.upper():
+                  print(
+                      "MTPE",
+                      number,
+                      item.get("document_type"),
+                      item.get("labor_relevance"),
+                      item.get("topic"),
+                      item.get("title"),
+                  )
+
+          telework = controls["009-2026-TR"]
+          inspection = controls["194-2026-TR"]
+          assert telework is not None, "No se encontró DS 009-2026-TR en El Peruano 2026-07-22"
+          assert inspection is not None, "No se encontró RM 194-2026-TR en El Peruano 2026-07-22"
+          assert telework["labor_relevance"] == "relevant", telework
+          assert "Teletrabajo" in str(telework.get("topic") or ""), telework
+          assert inspection["labor_relevance"] == "relevant", inspection
+          assert "Inspección laboral" in str(inspection.get("topic") or ""), inspection
+          assert counts.get("relevant", 0) >= 2, counts
+          PY
