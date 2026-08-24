@@ -236,6 +236,38 @@ class DatabaseMigrationTests(unittest.TestCase):
             self.assertIn("specific_labor_topic", row[5])
             self.assertIn("Artículo 1", row[6])
 
+    def test_metadata_only_upsert_preserves_existing_pdf_excerpt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
+            init_db()
+            base = {
+                "id": "excerpt:1",
+                "source": "El Peruano",
+                "document_type": "RESOLUCIÓN MINISTERIAL",
+                "number": "100-2026-TR",
+                "title": "Aprueban disposiciones complementarias",
+                "publication_date": "2026-08-22",
+                "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                "official_url": "https://example.invalid/excerpt-1",
+                "captured_at": "2026-08-22T00:00:00+00:00",
+            }
+            first = dict(base)
+            first["classification_text_excerpt"] = (
+                "Artículo 1.- Se regulan obligaciones sobre teletrabajo y jornada laboral."
+            )
+            upsert_norm(first)
+
+            # A later metadata refresh may not carry the PDF-derived text. It
+            # must not erase the stored excerpt from the previous enrichment.
+            upsert_norm(dict(base))
+
+            with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
+                row = conn.execute(
+                    "SELECT classification_text_excerpt FROM norms WHERE id = 'excerpt:1'"
+                ).fetchone()
+
+            self.assertIsNotNone(row)
+            self.assertIn("teletrabajo", row[0])
+
     def test_upsert_can_persist_semantic_audit_when_explicitly_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
             init_db()
