@@ -158,9 +158,15 @@ class HistoricalBackfillTests(unittest.TestCase):
                 row = conn.execute(
                     "SELECT status, error FROM sync_runs ORDER BY id DESC LIMIT 1"
                 ).fetchone()
-                coverage_count = conn.execute(
-                    "SELECT COUNT(*) FROM source_coverage_days"
-                ).fetchone()[0]
+                table_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'source_coverage_days'"
+                ).fetchone()
+                coverage_count = (
+                    conn.execute("SELECT COUNT(*) FROM source_coverage_days").fetchone()[0]
+                    if table_exists
+                    else 0
+                )
 
             self.assertEqual(row[0], "failed")
             self.assertIn("source unavailable", row[1])
