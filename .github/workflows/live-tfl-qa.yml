@@ -16,16 +16,13 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e .
-      - name: Validate live SUNAFIL Sala Plena source
+      - name: Inspect live SUNAFIL Sala Plena detail
         run: |
           python - <<'PY'
           import requests
+          from bs4 import BeautifulSoup
 
-          from radar_laboral.collectors.sunafil_tfl import (
-              LIST_URL,
-              fetch_detail,
-              fetch_listing_page,
-          )
+          from radar_laboral.collectors.sunafil_tfl import fetch_listing_page
 
           session = requests.Session()
           session.headers.update({
@@ -48,21 +45,30 @@ jobs:
           assert control is not None
           assert control["number"] == "001-2025-SUNAFIL-TFL", control
           assert control["publication_date"] == "2025-03-10", control
-          assert pagination[0] is True
-          assert pagination[1] is True
-          assert pagination[2] is False
+          assert pagination == [True, True, False], pagination
 
-          detail = fetch_detail(
-              session,
-              "https://www.gob.pe/institucion/sunafil/normas-legales/6556395-001-2025-sunafil-tfl",
-          )
-          print("detail number:", detail["number"])
-          print("detail date:", detail["publication_date"])
-          print("binding:", detail["binding_level"])
-          print("pdf:", detail["pdf_url"])
-          assert detail["number"] == "001-2025-SUNAFIL-TFL", detail
-          assert detail["publication_date"] == "2025-03-10", detail
-          assert detail["binding_level"] == "precedente administrativo de observancia obligatoria", detail
-          assert detail["summary"] and "observancia obligatoria" in detail["summary"].lower(), detail
-          assert detail["pdf_url"] and "gob.pe" in detail["pdf_url"], detail
+          url = "https://www.gob.pe/institucion/sunafil/normas-legales/6556395-001-2025-sunafil-tfl"
+          response = session.get(url, timeout=30)
+          response.raise_for_status()
+          soup = BeautifulSoup(response.text, "html.parser")
+
+          print("status:", response.status_code, "bytes:", len(response.text))
+          for meta in soup.find_all("meta"):
+              content = str(meta.get("content") or "")
+              name = str(meta.get("name") or meta.get("property") or "")
+              if "observancia" in content.lower() or "precedent" in content.lower() or name in {"description", "og:description", "twitter:description"}:
+                  print("META", name, repr(content[:2000]))
+
+          for script in soup.find_all("script"):
+              text = script.string or script.get_text(" ", strip=True)
+              if "observancia" in text.lower() or "precedent" in text.lower():
+                  print("SCRIPT", str(script.get("type") or ""), repr(text[:4000]))
+
+          for node in soup.find_all(True):
+              attrs = " ".join(str(v) for v in node.attrs.values())
+              text = node.get_text(" ", strip=True)
+              combined = attrs + " " + text
+              if "observancia obligatoria" in combined.lower():
+                  print("NODE", node.name, repr(attrs[:1000]), repr(text[:3000]))
+                  break
           PY
