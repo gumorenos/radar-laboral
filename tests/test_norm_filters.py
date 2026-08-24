@@ -120,14 +120,22 @@ class NormFilterTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in first], ["filter-c"])
         self.assertEqual([row["id"] for row in second], ["filter-b"])
 
-        filtered = search_norms(
+        ranked = search_norms(
+            query="regulan",
+            relevance="relevant",
+            issuer="TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            limit=2,
+            offset=0,
+        )
+        offset_ranked = search_norms(
             query="regulan",
             relevance="relevant",
             issuer="TRABAJO Y PROMOCIÓN DEL EMPLEO",
             limit=1,
             offset=1,
         )
-        self.assertEqual([row["id"] for row in filtered], ["filter-a"])
+        self.assertEqual(len(ranked), 2)
+        self.assertEqual([row["id"] for row in offset_ranked], [ranked[1]["id"]])
 
     def test_negative_offset_is_clamped_to_zero(self) -> None:
         rows = search_norms(relevance="all", limit=1, offset=-50)
