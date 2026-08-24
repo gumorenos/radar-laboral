@@ -17,9 +17,20 @@ from .db import (
     norm_stats,
     search_norms,
 )
+from .relations import list_related_case_law, list_related_norms
 
 PAGE_SIZE = 50
 MAX_PAGE = 100_000
+RELATION_LABELS = {
+    "amends": "Modifica",
+    "repeals": "Deroga",
+    "regulates": "Reglamenta",
+    "interprets": "Interpreta",
+    "applies": "Aplica",
+    "explains": "Explica",
+    "supports": "Sustenta",
+    "limits": "Limita",
+}
 
 
 def _page_number(value: str) -> int:
@@ -80,6 +91,19 @@ def create_app() -> Flask:
             filters=filters,
             options=list_norm_filter_options(),
             pagination=pagination,
+        )
+
+    @app.get("/norm/<norm_id>")
+    def norm_detail(norm_id: str):
+        row = get_norm(norm_id)
+        if row is None:
+            abort(404)
+        return render_template(
+            "norm_detail.html",
+            norm=row,
+            related_norms=list_related_norms(norm_id),
+            related_case_law=list_related_case_law(norm_id),
+            relation_labels=RELATION_LABELS,
         )
 
     @app.get("/norm/<norm_id>/pdf")
