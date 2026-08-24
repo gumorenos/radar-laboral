@@ -236,7 +236,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             self.assertIn("specific_labor_topic", row[5])
             self.assertIn("Artículo 1", row[6])
 
-    def test_metadata_only_upsert_preserves_existing_pdf_excerpt(self) -> None:
+    def test_metadata_only_upsert_preserves_existing_pdf_excerpt_and_decision(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
             init_db()
             base = {
@@ -254,19 +254,28 @@ class DatabaseMigrationTests(unittest.TestCase):
             first["classification_text_excerpt"] = (
                 "Artículo 1.- Se regulan obligaciones sobre teletrabajo y jornada laboral."
             )
-            upsert_norm(first)
+            first_result = upsert_norm(first)
+            self.assertEqual(first_result["labor_relevance"], "relevant")
 
             # A later metadata refresh may not carry the PDF-derived text. It
-            # must not erase the stored excerpt from the previous enrichment.
-            upsert_norm(dict(base))
+            # must reuse the stored excerpt before reclassification, otherwise
+            # the classification could silently regress from relevant to review.
+            second_result = upsert_norm(dict(base))
+            self.assertEqual(second_result["labor_relevance"], "relevant")
+            self.assertIn("teletrabajo", second_result["classification_text_excerpt"])
 
             with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
                 row = conn.execute(
-                    "SELECT classification_text_excerpt FROM norms WHERE id = 'excerpt:1'"
+                    """
+                    SELECT classification_text_excerpt, labor_relevance, classification_method
+                    FROM norms WHERE id = 'excerpt:1'
+                    """
                 ).fetchone()
 
             self.assertIsNotNone(row)
             self.assertIn("teletrabajo", row[0])
+            self.assertEqual(row[1], "relevant")
+            self.assertEqual(row[2], "rules_v4")
 
     def test_upsert_can_persist_semantic_audit_when_explicitly_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
