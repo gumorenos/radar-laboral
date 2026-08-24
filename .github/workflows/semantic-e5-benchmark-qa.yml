@@ -1,0 +1,68 @@
+name: semantic-e5-benchmark-qa
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  semantic-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install semantic extra
+        run: python -m pip install -e '.[semantic]'
+      - name: Compare rules and multilingual E5
+        env:
+          TOKENIZERS_PARALLELISM: "false"
+        run: |
+          /usr/bin/time -v python - <<'PY'
+          import json
+          import time
+          from pathlib import Path
+
+          from radar_laboral.benchmark import evaluate_cases, load_cases
+          from radar_laboral.semantic import E5SentenceTransformerScorer
+
+          benchmark = Path("benchmarks/classifier_seed_v1.jsonl")
+          cases = load_cases(benchmark)
+
+          rules = evaluate_cases(cases)
+          print("RULES_SUMMARY")
+          print(json.dumps({k: v for k, v in rules.items() if k != "rows"}, ensure_ascii=False, indent=2))
+
+          started = time.perf_counter()
+          scorer = E5SentenceTransformerScorer()
+          load_seconds = time.perf_counter() - started
+
+          started = time.perf_counter()
+          semantic = evaluate_cases(cases, semantic_scorer=scorer)
+          eval_seconds = time.perf_counter() - started
+
+          print("SEMANTIC_SUMMARY")
+          print(json.dumps({k: v for k, v in semantic.items() if k != "rows"}, ensure_ascii=False, indent=2))
+          print("TIMING", json.dumps({
+              "model_load_seconds": round(load_seconds, 3),
+              "benchmark_eval_seconds": round(eval_seconds, 3),
+              "cases": len(cases),
+          }))
+          print("CHANGED_CASES")
+          rule_rows = {row["id"]: row for row in rules["rows"]}
+          for row in semantic["rows"]:
+              previous = rule_rows[row["id"]]
+              if previous["predicted"] != row["predicted"] or row["semantic_score"] is not None:
+                  print(json.dumps({
+                      "id": row["id"],
+                      "expected_labor": row["expected_labor"],
+                      "rules": previous["predicted"],
+                      "hybrid": row["predicted"],
+                      "rule_score": row["rule_score"],
+                      "semantic_score": row["semantic_score"],
+                      "combined": row["classification_score"],
+                  }, ensure_ascii=False))
+          PY
+          du -sh ~/.cache/huggingface 2>/dev/null || true
