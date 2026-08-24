@@ -2,6 +2,7 @@ x-radar-environment: &radar-environment
   RADAR_DATA_DIR: /data
   RADAR_CATALOG_PATH: /data/catalog/norms.jsonl
   RADAR_CASE_LAW_CATALOG_PATH: /data/catalog/case_law.jsonl
+  RADAR_TIMEZONE: America/Lima
 
 services:
   radar-laboral:
@@ -11,6 +12,8 @@ services:
     restart: unless-stopped
     environment:
       <<: *radar-environment
+      RADAR_ADMIN_TOKEN: "${RADAR_ADMIN_TOKEN:-}"
+      RADAR_MAX_BACKFILL_DAYS: "${RADAR_MAX_BACKFILL_DAYS:-366}"
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -25,6 +28,22 @@ services:
       <<: *radar-environment
       RADAR_SYNC_INTERVAL_SECONDS: "21600"
       RADAR_SYNC_INITIAL_DELAY_SECONDS: "15"
+    volumes:
+      - ./storage:/data
+    healthcheck:
+      disable: true
+    depends_on:
+      radar-laboral:
+        condition: service_healthy
+
+  radar-laboral-worker:
+    image: radar-laboral:local
+    container_name: radar-laboral-worker
+    restart: unless-stopped
+    command: ["radar-laboral-worker"]
+    environment:
+      <<: *radar-environment
+      RADAR_WORKER_POLL_SECONDS: "30"
     volumes:
       - ./storage:/data
     healthcheck:
