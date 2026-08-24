@@ -24,6 +24,7 @@ def norm_record(norm_id: str, title: str, number: str) -> dict[str, object]:
         "topic": None,
         "status": "vigente",
         "edition": "extraordinary",
+        "classification_text_excerpt": "Artículo 1.- Se regulan derechos vinculados al teletrabajo.",
         "official_url": f"https://example.invalid/{norm_id}",
         "pdf_url": f"https://example.invalid/{norm_id}.pdf",
         "pdf_path": None,
@@ -69,6 +70,14 @@ class NormDetailTests(unittest.TestCase):
         self.assertIn(b"SHA-256", response.data)
         self.assertIn(("a" * 64).encode(), response.data)
         self.assertIn(b"Motivo de clasificaci", response.data)
+        self.assertIn(b"Auditor", response.data)
+        self.assertIn(b"Score combinado", response.data)
+        self.assertIn(b"Score de reglas", response.data)
+        self.assertIn(b"rules_v4", response.data)
+        self.assertIn(b"Evidencia estructurada", response.data)
+        self.assertIn(b"specific_labor_topic", response.data)
+        self.assertIn(b"Extracto legal usado", response.data)
+        self.assertIn(b"Art", response.data)
         self.assertIn(b"Abrir fuente oficial", response.data)
         self.assertIn(b"Abrir PDF", response.data)
         self.assertIn(b"Todav", response.data)
