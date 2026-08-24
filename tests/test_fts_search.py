@@ -83,18 +83,22 @@ class FtsSearchTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in prefix], ["fts:1"])
         self.assertEqual([row["id"] for row in by_number], ["fts:1"])
 
-    def test_fts_index_tracks_upsert_updates(self) -> None:
+    def test_fts_index_tracks_database_updates(self) -> None:
         self._require_fts5()
-        record = norm(
-            "fts:update",
-            title="Regulan teletrabajo en el sector privado",
-            number="002-2026-TR",
+        upsert_norm(
+            norm(
+                "fts:update",
+                title="Regulan teletrabajo en el sector privado",
+                number="002-2026-TR",
+            )
         )
-        upsert_norm(record)
         self.assertEqual(len(search_norms("teletrabajo", relevance="relevant")), 1)
 
-        record["title"] = "Regulan jornada remota en el sector privado"
-        upsert_norm(record)
+        with connect() as conn:
+            conn.execute(
+                "UPDATE norms SET title = ?, topic = ? WHERE id = ?",
+                ("Regulan jornada remota en el sector privado", "Jornada", "fts:update"),
+            )
 
         self.assertEqual(search_norms("teletrabajo", relevance="relevant"), [])
         self.assertEqual(
