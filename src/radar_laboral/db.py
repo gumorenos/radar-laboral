@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -28,6 +29,14 @@ CREATE TABLE IF NOT EXISTS norms (
     labor_relevance TEXT,
     relevance_reason TEXT,
     classification_version INTEGER,
+    classification_score REAL,
+    rule_score REAL,
+    semantic_score REAL,
+    semantic_model TEXT,
+    classification_method TEXT,
+    requires_review INTEGER,
+    classification_evidence TEXT,
+    classification_text_excerpt TEXT,
     official_url TEXT NOT NULL,
     pdf_url TEXT,
     pdf_path TEXT,
@@ -159,6 +168,14 @@ NORM_COLUMNS = (
     "labor_relevance",
     "relevance_reason",
     "classification_version",
+    "classification_score",
+    "rule_score",
+    "semantic_score",
+    "semantic_model",
+    "classification_method",
+    "requires_review",
+    "classification_evidence",
+    "classification_text_excerpt",
     "official_url",
     "pdf_url",
     "pdf_path",
@@ -230,6 +247,14 @@ def _ensure_norm_columns(conn: sqlite3.Connection) -> None:
         "relevance_reason": "TEXT",
         "classification_version": "INTEGER",
         "edition": "TEXT",
+        "classification_score": "REAL",
+        "rule_score": "REAL",
+        "semantic_score": "REAL",
+        "semantic_model": "TEXT",
+        "classification_method": "TEXT",
+        "requires_review": "INTEGER",
+        "classification_evidence": "TEXT",
+        "classification_text_excerpt": "TEXT",
     }
     for column, sql_type in additions.items():
         if column not in existing:
@@ -240,34 +265,77 @@ def _ensure_norm_columns(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_norms_edition ON norms(edition)")
 
 
+def _evidence_json(classification: Mapping[str, object]) -> str:
+    return json.dumps(
+        classification.get("classification_evidence") or {},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _classification_storage(classification: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "labor_relevance": classification["labor_relevance"],
+        "relevance_reason": classification["relevance_reason"],
+        "classification_version": classification["classification_version"],
+        "topic": classification["topic"],
+        "classification_score": classification.get("classification_score"),
+        "rule_score": classification.get("rule_score"),
+        "semantic_score": classification.get("semantic_score"),
+        "semantic_model": classification.get("semantic_model"),
+        "classification_method": classification.get("classification_method"),
+        "requires_review": int(bool(classification.get("requires_review"))),
+        "classification_evidence": _evidence_json(classification),
+    }
+
+
 def _backfill_norm_classification(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
-        SELECT id, source, document_type, number, title, summary, issuer, topic
+        SELECT id, source, document_type, number, title, summary, issuer, topic,
+               classification_text_excerpt
         FROM norms
         WHERE labor_relevance IS NULL
            OR relevance_reason IS NULL
            OR classification_version IS NULL
            OR classification_version < ?
+           OR classification_score IS NULL
+           OR classification_method IS NULL
+           OR classification_evidence IS NULL
         """,
         (CLASSIFIER_VERSION,),
     ).fetchall()
     for row in rows:
         classification = classify_labor(dict(row))
+        stored = _classification_storage(classification)
         conn.execute(
             """
             UPDATE norms
             SET labor_relevance = ?,
                 relevance_reason = ?,
                 topic = ?,
-                classification_version = ?
+                classification_version = ?,
+                classification_score = ?,
+                rule_score = ?,
+                semantic_score = ?,
+                semantic_model = ?,
+                classification_method = ?,
+                requires_review = ?,
+                classification_evidence = ?
             WHERE id = ?
             """,
             (
-                classification["labor_relevance"],
-                classification["relevance_reason"],
-                classification["topic"],
-                classification["classification_version"],
+                stored["labor_relevance"],
+                stored["relevance_reason"],
+                stored["topic"],
+                stored["classification_version"],
+                stored["classification_score"],
+                stored["rule_score"],
+                stored["semantic_score"],
+                stored["semantic_model"],
+                stored["classification_method"],
+                stored["requires_review"],
+                stored["classification_evidence"],
                 row["id"],
             ),
         )
@@ -312,26 +380,33 @@ def init_db() -> None:
         _ensure_norm_fts(conn)
 
 
-def enrich_norm(record: Mapping[str, object]) -> dict[str, object]:
+def enrich_norm(record: Mapping[str, object], *, semantic_scorer=None) -> dict[str, object]:
     enriched = dict(record)
-    classification = classify_labor(enriched)
-    enriched["labor_relevance"] = classification["labor_relevance"]
-    enriched["relevance_reason"] = classification["relevance_reason"]
-    enriched["classification_version"] = classification["classification_version"]
-    enriched["topic"] = classification["topic"]
+    classification = classify_labor(enriched, semantic_scorer=semantic_scorer)
+    enriched.update(_classification_storage(classification))
     return enriched
 
 
-def upsert_norm(record: Mapping[str, object]) -> dict[str, object]:
-    enriched = enrich_norm(record)
+def upsert_norm(record: Mapping[str, object], *, semantic_scorer=None) -> dict[str, object]:
+    enriched = enrich_norm(record, semantic_scorer=semantic_scorer)
 
     if isinstance(record, dict):
         record.update(
             {
-                "labor_relevance": enriched["labor_relevance"],
-                "relevance_reason": enriched["relevance_reason"],
-                "classification_version": enriched["classification_version"],
-                "topic": enriched.get("topic"),
+                key: enriched.get(key)
+                for key in (
+                    "labor_relevance",
+                    "relevance_reason",
+                    "classification_version",
+                    "topic",
+                    "classification_score",
+                    "rule_score",
+                    "semantic_score",
+                    "semantic_model",
+                    "classification_method",
+                    "requires_review",
+                    "classification_evidence",
+                )
             }
         )
 
@@ -356,6 +431,14 @@ def upsert_norm(record: Mapping[str, object]) -> dict[str, object]:
             labor_relevance = excluded.labor_relevance,
             relevance_reason = excluded.relevance_reason,
             classification_version = excluded.classification_version,
+            classification_score = excluded.classification_score,
+            rule_score = excluded.rule_score,
+            semantic_score = excluded.semantic_score,
+            semantic_model = excluded.semantic_model,
+            classification_method = excluded.classification_method,
+            requires_review = excluded.requires_review,
+            classification_evidence = excluded.classification_evidence,
+            classification_text_excerpt = COALESCE(excluded.classification_text_excerpt, norms.classification_text_excerpt),
             official_url = excluded.official_url,
             pdf_url = COALESCE(excluded.pdf_url, norms.pdf_url),
             pdf_path = COALESCE(excluded.pdf_path, norms.pdf_path),
