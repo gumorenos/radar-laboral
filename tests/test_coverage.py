@@ -6,7 +6,12 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
-from radar_laboral.coverage import coverage_summary, is_day_complete, mark_coverage_day
+from radar_laboral.coverage import (
+    complete_coverage_days,
+    coverage_summary,
+    is_day_complete,
+    mark_coverage_day,
+)
 from radar_laboral.db import init_db
 
 
@@ -43,6 +48,21 @@ class CoverageTests(unittest.TestCase):
             summary["missing_ranges"],
             [{"start": "2026-08-21", "end": "2026-08-21", "days": 1}],
         )
+
+    def test_complete_days_query_returns_only_complete_rows_inside_range(self) -> None:
+        mark_coverage_day(date(2026, 8, 19), record_count=1, is_complete=True)
+        mark_coverage_day(date(2026, 8, 20), record_count=1, is_complete=True)
+        mark_coverage_day(date(2026, 8, 21), record_count=1, is_complete=False)
+        mark_coverage_day(date(2026, 8, 22), record_count=0, is_complete=True)
+        mark_coverage_day(date(2026, 8, 23), record_count=1, is_complete=True)
+
+        result = complete_coverage_days(date(2026, 8, 20), date(2026, 8, 22))
+
+        self.assertEqual(result, {date(2026, 8, 20), date(2026, 8, 22)})
+
+    def test_complete_days_query_rejects_invalid_range(self) -> None:
+        with self.assertRaises(ValueError):
+            complete_coverage_days(date(2026, 8, 22), date(2026, 8, 21))
 
     def test_successful_empty_day_counts_as_complete(self) -> None:
         day = date(2026, 8, 22)

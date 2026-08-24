@@ -88,6 +88,31 @@ def is_day_complete(day: date, *, source: str = DEFAULT_SOURCE) -> bool:
     return bool(row and row["is_complete"])
 
 
+def complete_coverage_days(
+    start_date: date,
+    end_date: date,
+    *,
+    source: str = DEFAULT_SOURCE,
+) -> set[date]:
+    """Return complete days in a range with one indexed SQLite query."""
+    if end_date < start_date:
+        raise ValueError("La fecha final no puede ser anterior a la fecha inicial")
+
+    init_coverage()
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT coverage_date
+            FROM source_coverage_days
+            WHERE source = ? AND is_complete = 1
+              AND coverage_date BETWEEN ? AND ?
+            ORDER BY coverage_date
+            """,
+            (source, start_date.isoformat(), end_date.isoformat()),
+        ).fetchall()
+    return {date.fromisoformat(str(row["coverage_date"])) for row in rows}
+
+
 def _missing_ranges(days: list[date]) -> list[dict[str, object]]:
     if not days:
         return []
@@ -132,17 +157,8 @@ def coverage_summary(
     window_end = today - timedelta(days=1)
     window_start = window_end - timedelta(days=safe_days - 1)
 
+    verified = complete_coverage_days(window_start, window_end, source=source)
     with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT coverage_date
-            FROM source_coverage_days
-            WHERE source = ? AND is_complete = 1
-              AND coverage_date BETWEEN ? AND ?
-            ORDER BY coverage_date
-            """,
-            (source, window_start.isoformat(), window_end.isoformat()),
-        ).fetchall()
         today_row = conn.execute(
             """
             SELECT record_count, relevant_count, review_count, is_complete, checked_at
@@ -152,7 +168,6 @@ def coverage_summary(
             (source, today.isoformat()),
         ).fetchone()
 
-    verified = {date.fromisoformat(str(row["coverage_date"])) for row in rows}
     missing: list[date] = []
     current = window_start
     while current <= window_end:

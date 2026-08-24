@@ -22,9 +22,28 @@ class SyncWorkerTests(unittest.TestCase):
         self.tmp.cleanup()
 
     @patch("radar_laboral.sync_worker.backfill")
-    def test_processes_backfill_request(self, backfill_mock) -> None:
+    def test_metadata_request_processes_only_missing_days(self, backfill_mock) -> None:
         backfill_mock.return_value = [{"id": "a"}, {"id": "b"}]
         request_id, _ = enqueue_backfill_request(
+            "2026-07-01", "2026-07-03", download_pdfs=False
+        )
+
+        self.assertTrue(process_one_request())
+        backfill_mock.assert_called_once_with(
+            date(2026, 7, 1),
+            date(2026, 7, 3),
+            download_pdfs=False,
+            skip_complete_days=True,
+        )
+        row = list_sync_requests(1)[0]
+        self.assertEqual(row["id"], request_id)
+        self.assertEqual(row["status"], "success")
+        self.assertIsNone(row["error"])
+
+    @patch("radar_laboral.sync_worker.backfill")
+    def test_pdf_request_revalidates_full_range(self, backfill_mock) -> None:
+        backfill_mock.return_value = []
+        enqueue_backfill_request(
             "2026-07-01", "2026-07-03", download_pdfs=True
         )
 
@@ -33,11 +52,8 @@ class SyncWorkerTests(unittest.TestCase):
             date(2026, 7, 1),
             date(2026, 7, 3),
             download_pdfs=True,
+            skip_complete_days=False,
         )
-        row = list_sync_requests(1)[0]
-        self.assertEqual(row["id"], request_id)
-        self.assertEqual(row["status"], "success")
-        self.assertIsNone(row["error"])
 
     @patch("radar_laboral.sync_worker.backfill")
     def test_failure_is_recorded_without_crashing_worker(self, backfill_mock) -> None:

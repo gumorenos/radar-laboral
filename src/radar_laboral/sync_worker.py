@@ -40,21 +40,27 @@ def process_one_request() -> bool:
         start_date = date.fromisoformat(str(request_row["start_date"]))
         end_date = date.fromisoformat(str(request_row["end_date"]))
         download_pdfs = bool(request_row["download_pdfs"])
+        # Metadata coverage does not prove that every relevant PDF is cached.
+        # Skip verified days only for metadata-only gap completion. A request
+        # that explicitly asks for PDFs revalidates the full range.
+        skip_complete_days = not download_pdfs
         logging.info(
-            "Procesando carga histórica #%s: %s a %s; PDFs=%s",
+            "Procesando carga histórica #%s: %s a %s; PDFs=%s; modo=%s",
             request_id,
             start_date,
             end_date,
             download_pdfs,
+            "solo faltantes" if skip_complete_days else "rango completo",
         )
         records = backfill(
             start_date,
             end_date,
             download_pdfs=download_pdfs,
+            skip_complete_days=skip_complete_days,
         )
         finish_sync_request(request_id, status="success")
         logging.info(
-            "Carga histórica #%s completada: %s registros",
+            "Carga histórica #%s completada: %s registros procesados",
             request_id,
             len(records),
         )

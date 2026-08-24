@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from radar_laboral.collectors.el_peruano_history import _iter_days, backfill
+from radar_laboral.coverage import mark_coverage_day
 
 
 LABOR_RECORD = {
@@ -111,6 +112,62 @@ class HistoricalBackfillTests(unittest.TestCase):
             self.assertEqual(norm_count, 1)
             self.assertEqual(sync_count, 2)
             self.assertEqual(coverage, (1, 1, 0, 1))
+
+    def test_missing_only_skips_complete_days_and_sleeps_only_between_fetched_days(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
+            mark_coverage_day(date(2026, 8, 2), record_count=5, is_complete=True)
+            with patch(
+                "radar_laboral.collectors.el_peruano_history.fetch_day",
+                return_value=[],
+            ) as fetch_mock, patch(
+                "radar_laboral.collectors.el_peruano_history.local_today",
+                return_value=date(2026, 8, 24),
+            ), patch(
+                "radar_laboral.collectors.el_peruano_history.time.sleep"
+            ) as sleep_mock:
+                records = backfill(
+                    date(2026, 8, 1),
+                    date(2026, 8, 3),
+                    download_pdfs=False,
+                    catalog_path=Path(tmp) / "catalog" / "norms.jsonl",
+                    page_delay_seconds=0,
+                    day_delay_seconds=0.5,
+                    skip_complete_days=True,
+                )
+
+            self.assertEqual(records, [])
+            self.assertEqual(
+                [call.args[1] for call in fetch_mock.call_args_list],
+                [date(2026, 8, 1), date(2026, 8, 3)],
+            )
+            sleep_mock.assert_called_once_with(0.5)
+
+    def test_missing_only_does_no_source_work_when_entire_range_is_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
+            for day in (date(2026, 8, 1), date(2026, 8, 2)):
+                mark_coverage_day(day, record_count=0, is_complete=True)
+
+            with patch(
+                "radar_laboral.collectors.el_peruano_history.fetch_day"
+            ) as fetch_mock, patch(
+                "radar_laboral.collectors.el_peruano_history.time.sleep"
+            ) as sleep_mock:
+                records = backfill(
+                    date(2026, 8, 1),
+                    date(2026, 8, 2),
+                    download_pdfs=False,
+                    catalog_path=Path(tmp) / "catalog" / "norms.jsonl",
+                    skip_complete_days=True,
+                )
+
+            self.assertEqual(records, [])
+            fetch_mock.assert_not_called()
+            sleep_mock.assert_not_called()
+            with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
+                run = conn.execute(
+                    "SELECT status, records_seen FROM sync_runs ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+            self.assertEqual(run, ("success", 0))
 
     def test_successful_empty_day_is_still_covered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
