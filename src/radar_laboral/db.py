@@ -9,6 +9,8 @@ from typing import Mapping
 
 from .classifier import CLASSIFIER_VERSION, classify_labor
 
+SYNC_REQUEST_KIND_BACKFILL = "el_peruano_backfill"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS norms (
     id TEXT PRIMARY KEY,
@@ -123,6 +125,22 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 
 CREATE INDEX IF NOT EXISTS idx_sync_runs_source_started
     ON sync_runs(source, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS sync_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    download_pdfs INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_requests_status_id
+    ON sync_requests(status, id);
 """
 
 NORM_COLUMNS = (
@@ -617,6 +635,135 @@ def latest_sync_run(source: str | None = None):
                 (source,),
             ).fetchone()
         return conn.execute("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def enqueue_backfill_request(
+    start_date: str,
+    end_date: str,
+    *,
+    download_pdfs: bool = False,
+) -> tuple[int, bool]:
+    """Queue a historical El Peruano load, deduplicating identical active requests."""
+    with connect() as conn:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM sync_requests
+            WHERE kind = ? AND start_date = ? AND end_date = ? AND download_pdfs = ?
+              AND status IN ('pending', 'running')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                SYNC_REQUEST_KIND_BACKFILL,
+                start_date,
+                end_date,
+                int(download_pdfs),
+            ),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"]), False
+
+        cursor = conn.execute(
+            """
+            INSERT INTO sync_requests (
+                kind, start_date, end_date, download_pdfs, status, requested_at
+            ) VALUES (?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                SYNC_REQUEST_KIND_BACKFILL,
+                start_date,
+                end_date,
+                int(download_pdfs),
+                utc_now(),
+            ),
+        )
+        return int(cursor.lastrowid), True
+
+
+def list_sync_requests(limit: int = 20):
+    safe_limit = max(1, min(int(limit), 100))
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM sync_requests ORDER BY id DESC LIMIT ?",
+            (safe_limit,),
+        ).fetchall()
+
+
+def claim_next_sync_request():
+    """Atomically claim the oldest pending request for a single worker."""
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM sync_requests WHERE status = 'pending' ORDER BY id LIMIT 1"
+        ).fetchone()
+        if row is None:
+            conn.commit()
+            return None
+        now = utc_now()
+        conn.execute(
+            """
+            UPDATE sync_requests
+            SET status = 'running', started_at = ?, finished_at = NULL, error = NULL
+            WHERE id = ? AND status = 'pending'
+            """,
+            (now, row["id"]),
+        )
+        claimed = conn.execute(
+            "SELECT * FROM sync_requests WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+        conn.commit()
+        return claimed
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def finish_sync_request(request_id: int, *, status: str, error: str | None = None) -> None:
+    if status not in {"success", "failed"}:
+        raise ValueError("Estado final de solicitud no válido")
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE sync_requests
+            SET status = ?, finished_at = ?, error = ?
+            WHERE id = ?
+            """,
+            (status, utc_now(), error, int(request_id)),
+        )
+
+
+def recover_running_sync_requests() -> int:
+    """Return interrupted jobs to the queue; the historical upsert is idempotent."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE sync_requests
+            SET status = 'pending', started_at = NULL, finished_at = NULL,
+                error = 'Reencolado después de reinicio del worker'
+            WHERE status = 'running'
+            """
+        )
+        return int(cursor.rowcount)
+
+
+def norm_date_bounds() -> dict[str, str | None]:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT MIN(publication_date) AS earliest, MAX(publication_date) AS latest
+            FROM norms
+            WHERE publication_date IS NOT NULL AND publication_date <> ''
+            """
+        ).fetchone()
+    return {
+        "earliest": str(row["earliest"]) if row and row["earliest"] else None,
+        "latest": str(row["latest"]) if row and row["latest"] else None,
+    }
 
 
 def norm_stats() -> dict[str, int]:

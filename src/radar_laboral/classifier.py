@@ -4,7 +4,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 
-CLASSIFIER_VERSION = 2
+CLASSIFIER_VERSION = 3
 
 
 def _normalize(value: object | None) -> str:
@@ -24,21 +24,29 @@ LABOR_ISSUERS = (
 ADMINISTRATIVE_PATTERNS = (
     "designan ",
     "designar ",
+    "designacion temporal",
+    "designacion de asesor",
+    "designacion de funcionario",
+    "conclusion de la designacion",
+    "conclusion de designacion",
     "nombran ",
     "nombrar ",
     "aceptan renuncia",
+    "aceptan la renuncia",
     "aceptar renuncia",
+    "aceptar la renuncia",
     "dan por concluida",
     "dar por concluida",
     "encargan ",
     "encargar ",
+    "encargo de puesto",
+    "conclusion de la encargatura",
     "autorizan viaje",
     "autorizacion de viaje",
     "conforman grupo de trabajo",
     "conforman comision",
     "delegan facultades",
-    "designacion de asesor",
-    "designacion de funcionario",
+    "manual de perfiles de puestos",
 )
 
 TOPIC_PATTERNS: dict[str, tuple[str, ...]] = {
@@ -64,7 +72,9 @@ TOPIC_PATTERNS: dict[str, tuple[str, ...]] = {
         "enfermedad ocupacional", "comite de seguridad y salud",
     ),
     "Inspección laboral": (
-        "inspeccion del trabajo", "fiscalizacion laboral", "infracciones sociolaborales",
+        "inspeccion del trabajo", "sistema de inspeccion del trabajo",
+        "ley general de inspeccion del trabajo", "funcion inspectiva",
+        "funciones inspectivas", "fiscalizacion laboral", "infracciones sociolaborales",
         "tribunal de fiscalizacion laboral", "actuaciones inspectivas",
     ),
     "Relaciones colectivas": (

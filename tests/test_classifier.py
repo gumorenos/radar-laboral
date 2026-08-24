@@ -28,6 +28,28 @@ class LaborClassifierTests(unittest.TestCase):
         self.assertEqual(result["labor_relevance"], "not_labor")
         self.assertIn("acto administrativo", result["relevance_reason"] or "")
 
+    def test_conclusion_of_temporary_designation_stays_non_labor_despite_sst_words(self) -> None:
+        result = classify_labor({
+            "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            "document_type": "RESOLUCIÓN MINISTERIAL",
+            "title": (
+                "Disponen la conclusión de la designación temporal de Directora de la Dirección "
+                "de Seguridad y Salud en el Trabajo"
+            ),
+        })
+
+        self.assertEqual(result["labor_relevance"], "not_labor")
+        self.assertIn("Seguridad y salud en el trabajo", result["topic"] or "")
+        self.assertIn("acto administrativo", result["relevance_reason"] or "")
+
+    def test_acceptance_of_resignation_with_article_is_non_labor(self) -> None:
+        result = classify_labor({
+            "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            "document_type": "RESOLUCIÓN MINISTERIAL",
+            "title": "Aceptan la renuncia de Director General de Trabajo",
+        })
+        self.assertEqual(result["labor_relevance"], "not_labor")
+
     def test_generic_labor_word_outside_labor_authority_is_not_enough(self) -> None:
         result = classify_labor({
             "issuer": "OTRA ENTIDAD",
@@ -55,6 +77,20 @@ class LaborClassifierTests(unittest.TestCase):
         })
 
         self.assertEqual(result["labor_relevance"], "review")
+
+    def test_function_inspectiva_is_specific_labor_inspection_topic(self) -> None:
+        result = classify_labor({
+            "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+            "document_type": "RESOLUCIÓN MINISTERIAL",
+            "title": (
+                "Establecen medidas para garantizar el adecuado ejercicio de la función inspectiva "
+                "en el Sistema de Inspección del Trabajo"
+            ),
+        })
+
+        self.assertEqual(result["labor_relevance"], "relevant")
+        self.assertIn("Inspección laboral", result["topic"] or "")
+        self.assertEqual(result["classification_version"], 3)
 
     def test_specific_payroll_rule_is_relevant(self) -> None:
         result = classify_labor({

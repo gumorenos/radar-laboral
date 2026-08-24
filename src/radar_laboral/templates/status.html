@@ -6,20 +6,40 @@
   <title>Estado · Radar Laboral Perú</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
-    main { max-width: 960px; margin: 0 auto; padding: 32px 20px; }
+    main { max-width: 1040px; margin: 0 auto; padding: 32px 20px; }
     a { color: inherit; }
     .top { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
     .sub { color: #666; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 24px 0; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; margin: 24px 0; }
     .card, .panel { background: white; border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; }
+    .panel { margin-top: 16px; }
     .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .value-date { font-size: 18px; padding-top: 6px; }
     .label { color: #666; font-size: 13px; }
     dl { display: grid; grid-template-columns: minmax(170px, 220px) 1fr; gap: 10px 16px; margin: 0; }
     dt { color: #666; }
     dd { margin: 0; overflow-wrap: anywhere; }
     .ok { color: #166534; font-weight: 600; }
     .failed { color: #991b1b; font-weight: 600; }
+    .pending { color: #92400e; font-weight: 600; }
+    .running { color: #1d4ed8; font-weight: 600; }
     code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; }
+    .sync-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: end; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 13px; color: #555; font-weight: 600; }
+    input, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; box-sizing: border-box; width: 100%; }
+    button { cursor: pointer; background: #222; color: white; }
+    input:disabled, button:disabled { cursor: not-allowed; opacity: .55; }
+    .check { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
+    .check input { width: auto; }
+    .notice { padding: 11px 13px; border-radius: 8px; margin: 12px 0; }
+    .notice-ok { background: #dcfce7; color: #166534; }
+    .notice-error { background: #fee2e2; color: #991b1b; }
+    .notice-warn { background: #fef3c7; color: #92400e; }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; min-width: 760px; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; font-size: 13px; }
+    th { color: #555; background: #fafafa; }
   </style>
 </head>
 <body>
@@ -27,7 +47,7 @@
   <div class="top">
     <div>
       <h1>Estado del Radar</h1>
-      <p class="sub">Datos locales, cache de PDFs y última sincronización.</p>
+      <p class="sub">Datos locales, cobertura histórica, cola de carga y última sincronización.</p>
     </div>
     <a href="/">← Volver a normas</a>
   </div>
@@ -37,10 +57,71 @@
     <div class="card"><div class="label">Relevantes</div><div class="value">{{ stats.relevant }}</div></div>
     <div class="card"><div class="label">Por revisar</div><div class="value">{{ stats.review }}</div></div>
     <div class="card"><div class="label">PDFs locales</div><div class="value">{{ stats.pdf_cached }}</div></div>
+    <div class="card"><div class="label">Primera fecha cargada</div><div class="value value-date">{{ date_bounds.earliest or '—' }}</div></div>
+    <div class="card"><div class="label">Última fecha cargada</div><div class="value value-date">{{ date_bounds.latest or '—' }}</div></div>
   </div>
 
   <section class="panel">
-    <h2>Última sincronización</h2>
+    <h2>Carga histórica de El Peruano</h2>
+    <p class="sub">Selecciona desde qué fecha quieres completar el inventario. El trabajo se encola y lo procesa un worker separado; la web continúa respondiendo mientras corre. Repetir un rango es seguro porque el almacenamiento usa upsert por documento.</p>
+
+    {% if queued %}
+      {% if created == '1' %}<div class="notice notice-ok">Solicitud #{{ queued }} encolada correctamente.</div>{% else %}<div class="notice notice-warn">La solicitud #{{ queued }} ya estaba pendiente o en ejecución; no se duplicó.</div>{% endif %}
+    {% endif %}
+    {% if sync_error %}<div class="notice notice-error">{{ sync_error }}</div>{% endif %}
+    {% if not admin_enabled %}
+      <div class="notice notice-warn">La carga desde la web está deshabilitada hasta configurar <code>RADAR_ADMIN_TOKEN</code>. Los selectores se muestran para dejar clara la funcionalidad, pero no se puede encolar trabajo desde el dominio público sin esa protección.</div>
+    {% endif %}
+
+    <form class="sync-form" method="post" action="/admin/backfill">
+      <div class="field">
+        <label for="start_date">Traer desde</label>
+        <input id="start_date" type="date" name="start_date" max="{{ today }}" required {% if not admin_enabled %}disabled{% endif %}>
+      </div>
+      <div class="field">
+        <label for="end_date">Hasta</label>
+        <input id="end_date" type="date" name="end_date" value="{{ today }}" max="{{ today }}" required {% if not admin_enabled %}disabled{% endif %}>
+      </div>
+      <div class="field">
+        <label for="admin_token">Clave administrativa</label>
+        <input id="admin_token" type="password" name="admin_token" autocomplete="current-password" required {% if not admin_enabled %}disabled{% endif %}>
+      </div>
+      <div class="field">
+        <label class="check"><input type="checkbox" name="download_pdfs" value="1" {% if not admin_enabled %}disabled{% endif %}> Descargar también PDFs laborales</label>
+        <button type="submit" {% if not admin_enabled %}disabled{% endif %}>Encolar carga histórica</button>
+      </div>
+    </form>
+    <p class="sub">Máximo por solicitud: {{ max_backfill_days }} días. Para la primera carga conviene dejar los PDFs desmarcados y completar metadatos primero.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Solicitudes recientes</h2>
+    {% if sync_requests %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Rango</th><th>PDFs</th><th>Estado</th><th>Solicitada</th><th>Inicio / fin</th><th>Error</th></tr></thead>
+          <tbody>
+          {% for item in sync_requests %}
+            <tr>
+              <td>{{ item.id }}</td>
+              <td>{{ item.start_date }} → {{ item.end_date }}</td>
+              <td>{{ 'Sí' if item.download_pdfs else 'No' }}</td>
+              <td class="{{ item.status }}">{{ item.status }}</td>
+              <td>{{ item.requested_at }}</td>
+              <td>{{ item.started_at or '—' }}<br>{{ item.finished_at or '—' }}</td>
+              <td>{% if item.error %}<code>{{ item.error }}</code>{% else %}—{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="sub">No hay solicitudes de carga histórica todavía.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Última sincronización ejecutada</h2>
     {% if last_sync %}
       <dl>
         <dt>Fuente</dt><dd>{{ last_sync.source }}</dd>
