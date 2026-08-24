@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import tempfile
@@ -58,6 +59,13 @@ CREATE TABLE norms (
 """
 
 
+class FakeSemanticScorer:
+    name = "fake-semantic"
+
+    def score(self, text: str) -> float:
+        return 0.91
+
+
 class DatabaseMigrationTests(unittest.TestCase):
     def _run_init(self, tmp: str) -> None:
         old_value = os.environ.get("RADAR_DATA_DIR")
@@ -114,18 +122,40 @@ class DatabaseMigrationTests(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(norms)")}
                 row = conn.execute(
-                    "SELECT labor_relevance, relevance_reason, topic, classification_version "
-                    "FROM norms WHERE id = 'legacy:1'"
+                    """
+                    SELECT labor_relevance, relevance_reason, topic, classification_version,
+                           classification_score, rule_score, semantic_score,
+                           classification_method, requires_review, classification_evidence
+                    FROM norms WHERE id = 'legacy:1'
+                    """
                 ).fetchone()
 
-            self.assertIn("labor_relevance", columns)
-            self.assertIn("relevance_reason", columns)
-            self.assertIn("classification_version", columns)
-            self.assertIn("edition", columns)
+            for column in (
+                "labor_relevance",
+                "relevance_reason",
+                "classification_version",
+                "edition",
+                "classification_score",
+                "rule_score",
+                "semantic_score",
+                "semantic_model",
+                "classification_method",
+                "requires_review",
+                "classification_evidence",
+                "classification_text_excerpt",
+            ):
+                self.assertIn(column, columns)
             self.assertEqual(row[0], "relevant")
             self.assertIn("materia laboral específica", row[1])
             self.assertIn("Teletrabajo", row[2])
             self.assertEqual(row[3], CLASSIFIER_VERSION)
+            self.assertGreater(row[4], 0.68)
+            self.assertGreater(row[5], 0.68)
+            self.assertIsNone(row[6])
+            self.assertEqual(row[7], "rules_v4")
+            self.assertEqual(row[8], 0)
+            evidence = json.loads(row[9])
+            self.assertTrue(evidence["positive"])
 
     def test_old_classification_is_recomputed_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -159,16 +189,18 @@ class DatabaseMigrationTests(unittest.TestCase):
 
             with sqlite3.connect(db_path) as conn:
                 row = conn.execute(
-                    "SELECT labor_relevance, classification_version FROM norms "
-                    "WHERE id = 'legacy:generic'"
+                    "SELECT labor_relevance, classification_version, classification_score, "
+                    "classification_method FROM norms WHERE id = 'legacy:generic'"
                 ).fetchone()
                 columns = {item[1] for item in conn.execute("PRAGMA table_info(norms)")}
 
             self.assertEqual(row[0], "not_labor")
             self.assertEqual(row[1], CLASSIFIER_VERSION)
+            self.assertIsNotNone(row[2])
+            self.assertEqual(row[3], "rules_v4")
             self.assertIn("edition", columns)
 
-    def test_upsert_persists_edition(self) -> None:
+    def test_upsert_persists_edition_and_audit_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
             init_db()
             upsert_norm(
@@ -181,17 +213,97 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "publication_date": "2026-08-22",
                     "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
                     "edition": "extraordinary",
+                    "classification_text_excerpt": "Artículo 1.- Se modifica el régimen de teletrabajo.",
                     "official_url": "https://example.invalid/edition-1",
                     "captured_at": "2026-08-22T00:00:00+00:00",
                 }
             )
 
             with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
-                edition = conn.execute(
-                    "SELECT edition FROM norms WHERE id = 'edition:1'"
-                ).fetchone()[0]
+                row = conn.execute(
+                    """
+                    SELECT edition, classification_score, rule_score, classification_method,
+                           requires_review, classification_evidence, classification_text_excerpt
+                    FROM norms WHERE id = 'edition:1'
+                    """
+                ).fetchone()
 
-            self.assertEqual(edition, "extraordinary")
+            self.assertEqual(row[0], "extraordinary")
+            self.assertGreater(row[1], 0.68)
+            self.assertGreater(row[2], 0.68)
+            self.assertEqual(row[3], "rules_v4")
+            self.assertEqual(row[4], 0)
+            self.assertIn("specific_labor_topic", row[5])
+            self.assertIn("Artículo 1", row[6])
+
+    def test_metadata_only_upsert_preserves_existing_pdf_excerpt_and_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
+            init_db()
+            base = {
+                "id": "excerpt:1",
+                "source": "El Peruano",
+                "document_type": "RESOLUCIÓN MINISTERIAL",
+                "number": "100-2026-TR",
+                "title": "Aprueban disposiciones complementarias",
+                "publication_date": "2026-08-22",
+                "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                "official_url": "https://example.invalid/excerpt-1",
+                "captured_at": "2026-08-22T00:00:00+00:00",
+            }
+            first = dict(base)
+            first["classification_text_excerpt"] = (
+                "Artículo 1.- Se regulan obligaciones sobre teletrabajo y jornada laboral."
+            )
+            first_result = upsert_norm(first)
+            self.assertEqual(first_result["labor_relevance"], "relevant")
+
+            # A later metadata refresh may not carry the PDF-derived text. It
+            # must reuse the stored excerpt before reclassification, otherwise
+            # the classification could silently regress from relevant to review.
+            second_result = upsert_norm(dict(base))
+            self.assertEqual(second_result["labor_relevance"], "relevant")
+            self.assertIn("teletrabajo", second_result["classification_text_excerpt"])
+
+            with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
+                row = conn.execute(
+                    """
+                    SELECT classification_text_excerpt, labor_relevance, classification_method
+                    FROM norms WHERE id = 'excerpt:1'
+                    """
+                ).fetchone()
+
+            self.assertIsNotNone(row)
+            self.assertIn("teletrabajo", row[0])
+            self.assertEqual(row[1], "relevant")
+            self.assertEqual(row[2], "rules_v4")
+
+    def test_upsert_can_persist_semantic_audit_when_explicitly_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
+            init_db()
+            result = upsert_norm(
+                {
+                    "id": "semantic:1",
+                    "source": "El Peruano",
+                    "document_type": "RESOLUCIÓN MINISTERIAL",
+                    "title": "Aprueban criterios técnicos sobre derechos de personas que prestan servicios",
+                    "publication_date": "2026-08-22",
+                    "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                    "official_url": "https://example.invalid/semantic-1",
+                    "captured_at": "2026-08-22T00:00:00+00:00",
+                },
+                semantic_scorer=FakeSemanticScorer(),
+            )
+
+            self.assertEqual(result["classification_method"], "hybrid_v4")
+            with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
+                row = conn.execute(
+                    "SELECT semantic_score, semantic_model, classification_method "
+                    "FROM norms WHERE id = 'semantic:1'"
+                ).fetchone()
+
+            self.assertEqual(row[0], 0.91)
+            self.assertEqual(row[1], "fake-semantic")
+            self.assertEqual(row[2], "hybrid_v4")
 
 
 if __name__ == "__main__":

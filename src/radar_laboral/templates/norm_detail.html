@@ -30,7 +30,10 @@
     .relation-list li { padding: 13px 0; border-bottom: 1px solid #eee; }
     .relation-list li:last-child { border-bottom: 0; }
     .relation-meta { color: #666; font-size: 13px; margin-top: 4px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+    pre { white-space: pre-wrap; max-height: 360px; overflow: auto; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e5e7eb; }
+    details { margin-top: 14px; }
+    summary { cursor: pointer; font-weight: 650; }
   </style>
 </head>
 <body>
@@ -58,6 +61,25 @@
     </dl>
     {% if norm.summary %}<h3>Sumilla / resumen</h3><p>{{ norm.summary }}</p>{% endif %}
     {% if norm.relevance_reason %}<h3>Motivo de clasificación</h3><p>{{ norm.relevance_reason }}</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Auditoría de clasificación</h2>
+    <p class="muted">Los scores son señales de evidencia de la versión del clasificador; no representan probabilidades jurídicas calibradas.</p>
+    <dl class="grid">
+      <div class="field"><dt>Score combinado</dt><dd>{% if norm.classification_score is not none %}{{ '%.3f'|format(norm.classification_score) }}{% else %}—{% endif %}</dd></div>
+      <div class="field"><dt>Score de reglas</dt><dd>{% if norm.rule_score is not none %}{{ '%.3f'|format(norm.rule_score) }}{% else %}—{% endif %}</dd></div>
+      <div class="field"><dt>Score semántico</dt><dd>{% if norm.semantic_score is not none %}{{ '%.3f'|format(norm.semantic_score) }}{% else %}No usado{% endif %}</dd></div>
+      <div class="field"><dt>Método</dt><dd>{{ norm.classification_method or '—' }}</dd></div>
+      <div class="field"><dt>Modelo semántico</dt><dd>{{ norm.semantic_model or 'No usado' }}</dd></div>
+      <div class="field"><dt>Revisión humana</dt><dd>{% if norm.requires_review %}<span class="badge badge-review">Recomendada</span>{% else %}No requerida por el clasificador{% endif %}</dd></div>
+    </dl>
+    {% if norm.classification_evidence %}
+      <details><summary>Evidencia estructurada</summary><pre>{{ norm.classification_evidence }}</pre></details>
+    {% endif %}
+    {% if norm.classification_text_excerpt %}
+      <details><summary>Extracto legal usado para clasificar</summary><pre>{{ norm.classification_text_excerpt }}</pre></details>
+    {% endif %}
   </section>
 
   <section class="card">
