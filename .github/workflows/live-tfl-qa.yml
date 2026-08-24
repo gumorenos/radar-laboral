@@ -1,0 +1,68 @@
+name: live-tfl-qa
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  live-tfl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e .
+      - name: Validate live SUNAFIL Sala Plena source
+        run: |
+          python - <<'PY'
+          import requests
+
+          from radar_laboral.collectors.sunafil_tfl import (
+              LIST_URL,
+              fetch_detail,
+              fetch_listing_page,
+          )
+
+          session = requests.Session()
+          session.headers.update({
+              "User-Agent": "radar-laboral-live-qa/0.1 (+https://github.com/gumorenos/radar-laboral)",
+              "Accept-Language": "es-PE,es;q=0.9",
+          })
+
+          unique = {}
+          pagination = []
+          for sheet in (1, 2, 3):
+              records, has_next = fetch_listing_page(session, sheet)
+              print("sheet", sheet, "records", len(records), "has_next", has_next)
+              pagination.append(has_next)
+              for record in records:
+                  unique[record["id"]] = record
+
+          print("unique listing records:", len(unique))
+          assert len(unique) >= 53, len(unique)
+          control = unique.get("sunafil-tfl:6556395")
+          assert control is not None
+          assert control["number"] == "001-2025-SUNAFIL-TFL", control
+          assert control["publication_date"] == "2025-03-10", control
+          assert pagination[0] is True
+          assert pagination[1] is True
+          assert pagination[2] is False
+
+          detail = fetch_detail(
+              session,
+              "https://www.gob.pe/institucion/sunafil/normas-legales/6556395-001-2025-sunafil-tfl",
+          )
+          print("detail number:", detail["number"])
+          print("detail date:", detail["publication_date"])
+          print("binding:", detail["binding_level"])
+          print("pdf:", detail["pdf_url"])
+          assert detail["number"] == "001-2025-SUNAFIL-TFL", detail
+          assert detail["publication_date"] == "2025-03-10", detail
+          assert detail["binding_level"] == "precedente administrativo de observancia obligatoria", detail
+          assert detail["summary"] and "observancia obligatoria" in detail["summary"].lower(), detail
+          assert detail["pdf_url"] and "gob.pe" in detail["pdf_url"], detail
+          PY
