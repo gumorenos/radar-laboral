@@ -387,8 +387,20 @@ def enrich_norm(record: Mapping[str, object], *, semantic_scorer=None) -> dict[s
     return enriched
 
 
+def _record_with_existing_excerpt(record: Mapping[str, object]) -> dict[str, object]:
+    candidate = dict(record)
+    if candidate.get("classification_text_excerpt") or not candidate.get("id"):
+        return candidate
+
+    existing = get_norm(str(candidate["id"]))
+    if existing is not None and existing["classification_text_excerpt"]:
+        candidate["classification_text_excerpt"] = str(existing["classification_text_excerpt"])
+    return candidate
+
+
 def upsert_norm(record: Mapping[str, object], *, semantic_scorer=None) -> dict[str, object]:
-    enriched = enrich_norm(record, semantic_scorer=semantic_scorer)
+    candidate = _record_with_existing_excerpt(record)
+    enriched = enrich_norm(candidate, semantic_scorer=semantic_scorer)
 
     if isinstance(record, dict):
         record.update(
@@ -406,6 +418,7 @@ def upsert_norm(record: Mapping[str, object], *, semantic_scorer=None) -> dict[s
                     "classification_method",
                     "requires_review",
                     "classification_evidence",
+                    "classification_text_excerpt",
                 )
             }
         )
