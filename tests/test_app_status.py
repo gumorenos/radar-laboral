@@ -199,6 +199,7 @@ class AppStatusTests(unittest.TestCase):
         self.assertNotIn("Página 2".encode(), response.data)
 
     def test_status_api_reports_latest_sync_date_bounds_and_coverage(self) -> None:
+        fixed_today = date(2026, 8, 24)
         upsert_norm(
             _record(
                 "dated",
@@ -207,8 +208,7 @@ class AppStatusTests(unittest.TestCase):
                 publication_date="2026-07-22",
             )
         )
-        today = date.today()
-        closed_day = today - timedelta(days=1)
+        closed_day = fixed_today - timedelta(days=1)
         mark_coverage_day(closed_day, record_count=3, relevant_count=1, is_complete=True)
         run_id = start_sync_run("El Peruano")
         finish_sync_run(
@@ -221,7 +221,9 @@ class AppStatusTests(unittest.TestCase):
             latest_publication_date="2026-08-23",
         )
 
-        response = self.client.get("/api/status")
+        with patch("radar_laboral.app._local_today", return_value=fixed_today):
+            response = self.client.get("/api/status")
+
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertEqual(payload["status"], "ok")
@@ -232,7 +234,8 @@ class AppStatusTests(unittest.TestCase):
         self.assertEqual(payload["sync_requests"], [])
         self.assertIn("coverage", payload)
         self.assertEqual(payload["coverage"]["target_days"], 3)
-        self.assertGreaterEqual(payload["coverage"]["verified_days"], 1)
+        self.assertEqual(payload["coverage"]["verified_days"], 1)
+        self.assertEqual(payload["coverage"]["window_end"], "2026-08-23")
 
     def test_status_page_renders_coverage_and_historical_selector_state(self) -> None:
         response = self.client.get("/status")
