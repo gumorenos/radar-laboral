@@ -34,6 +34,9 @@
     .badge-review { background: #fef3c7; }
     .badge-not_labor { background: #f1f5f9; color: #64748b; }
     .badge-extraordinary { margin-top: 5px; background: #e0e7ff; }
+    .pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; }
+    .pagination a, .pagination span { padding: 8px 10px; }
+    .page-disabled { color: #aaa; }
     a { color: inherit; }
   </style>
 </head>
@@ -164,6 +167,22 @@
       <div class="empty">No hay normas que coincidan con estos filtros. Puedes ampliar la relevancia o limpiar los filtros.</div>
     {% endif %}
   </div>
+
+  {% if pagination.has_previous or pagination.has_next %}
+    <nav class="pagination" aria-label="Paginación">
+      {% if pagination.has_previous %}
+        <a href="{{ pagination.previous_url }}">← Anterior</a>
+      {% else %}
+        <span class="page-disabled">← Anterior</span>
+      {% endif %}
+      <span>Página {{ pagination.page }}</span>
+      {% if pagination.has_next %}
+        <a href="{{ pagination.next_url }}">Siguiente →</a>
+      {% else %}
+        <span class="page-disabled">Siguiente →</span>
+      {% endif %}
+    </nav>
+  {% endif %}
 </main>
 </body>
 </html>
