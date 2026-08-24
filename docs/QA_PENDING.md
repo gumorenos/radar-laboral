@@ -100,7 +100,27 @@ o:
 {"edition": "extraordinary"}
 ```
 
-La persistencia de `edition` dentro de SQLite/UI debe verificarse por separado cuando se incorpore su migración de esquema; el catálogo JSONL ya conserva este metadato.
+Comprobar también que la migración añadió `edition` a SQLite y que existen registros extraordinarios cuando la fecha consultada los contiene:
+
+```bash
+docker compose exec -T radar-laboral python - <<'PY'
+from radar_laboral.db import connect
+
+with connect() as conn:
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(norms)")]
+    print("edition column:", "edition" in columns)
+    print(
+        "extraordinary rows:",
+        conn.execute("SELECT COUNT(*) FROM norms WHERE edition = 'extraordinary'").fetchone()[0],
+    )
+PY
+```
+
+Criterios:
+
+- `edition column: True`;
+- el conteo extraordinario es mayor que cero después de cargar una fecha con edición `EX`;
+- en la interfaz web esos registros muestran la etiqueta **Extraordinaria**.
 
 ## 6. PDF real de una norma laboral
 
