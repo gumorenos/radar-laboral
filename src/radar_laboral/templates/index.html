@@ -14,6 +14,8 @@
     .sub { margin-top: 0; }
     .summary-strip { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 16px 0 4px; padding: 12px 14px; border: 1px solid #e5e5e5; border-radius: 10px; background: white; font-size: 14px; }
     .summary-strip .push { margin-left: auto; }
+    .coverage-warning { margin: 10px 0 0; padding: 11px 13px; border-radius: 9px; background: #fef3c7; color: #92400e; font-size: 14px; }
+    .coverage-ok { background: #dcfce7; color: #166534; }
     form { margin: 24px 0; }
     .search-row { display: flex; gap: 10px; flex-wrap: wrap; }
     input, select, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; }
@@ -58,9 +60,19 @@
     <span><strong>{{ stats.relevant }}</strong> relevantes</span>
     <span><strong>{{ stats.review }}</strong> por revisar</span>
     <span><strong>{{ stats.total }}</strong> en inventario</span>
-    {% if date_bounds.earliest %}<span>Cobertura: <strong>{{ date_bounds.earliest }}</strong> → <strong>{{ date_bounds.latest }}</strong></span>{% else %}<span>Sin fechas cargadas</span>{% endif %}
-    <a class="push" href="/status">Cargar desde otra fecha</a>
+    {% if date_bounds.earliest %}<span>Normas almacenadas: <strong>{{ date_bounds.earliest }}</strong> → <strong>{{ date_bounds.latest }}</strong></span>{% else %}<span>Sin fechas almacenadas</span>{% endif %}
+    <span>Cobertura verificada: <strong>{{ coverage.verified_days }}/{{ coverage.target_days }}</strong> días</span>
+    <a class="push" href="/status">Revisar / completar cobertura</a>
   </div>
+
+  {% if coverage.missing_days > 0 %}
+    <div class="coverage-warning">
+      Faltan <strong>{{ coverage.missing_days }}</strong> días por verificar en la ventana {{ coverage.window_start }} → {{ coverage.window_end }}.
+      La primera fecha faltante es <strong>{{ coverage.first_missing }}</strong>. <a href="/status">Completar histórico →</a>
+    </div>
+  {% else %}
+    <div class="coverage-warning coverage-ok">Cobertura histórica verificada al 100% para {{ coverage.window_start }} → {{ coverage.window_end }}.</div>
+  {% endif %}
 
   {% set advanced_active = filters.source or filters.document_type or filters.issuer or filters.topic or filters.edition or filters.date_from or filters.date_to %}
   <form method="get">
@@ -113,7 +125,7 @@
       </table>
     {% else %}
       {% if stats.total > 0 and stats.relevant == 0 and stats.review == 0 and relevance in ['tracked', 'relevant', 'review'] %}
-        <div class="empty">Hay {{ stats.total }} documentos en el inventario, pero ninguno está clasificado como laboral o por revisar. Es posible que la base solo cubra días recientes sin normas laborales sustantivas. <a href="/status">Carga un rango histórico desde una fecha anterior.</a></div>
+        <div class="empty">Hay {{ stats.total }} documentos en el inventario, pero ninguno está clasificado como laboral o por revisar. Es posible que la base solo cubra días recientes sin normas laborales sustantivas. <a href="/status">Completa la cobertura histórica desde la primera fecha faltante.</a></div>
       {% else %}
         <div class="empty">No hay normas que coincidan con estos filtros. Puedes ampliar la relevancia, limpiar los filtros o <a href="/status">revisar la cobertura histórica</a>.</div>
       {% endif %}

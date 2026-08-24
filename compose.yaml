@@ -14,6 +14,7 @@ services:
       <<: *radar-environment
       RADAR_ADMIN_TOKEN: "${RADAR_ADMIN_TOKEN:-}"
       RADAR_MAX_BACKFILL_DAYS: "${RADAR_MAX_BACKFILL_DAYS:-366}"
+      RADAR_COVERAGE_DAYS: "${RADAR_COVERAGE_DAYS:-365}"
     ports:
       - "127.0.0.1:8080:8080"
     volumes:

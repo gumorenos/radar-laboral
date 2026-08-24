@@ -17,6 +17,7 @@ from .case_law import (
     list_case_law_filter_options,
     search_case_law,
 )
+from .coverage import coverage_summary
 from .db import (
     data_dir,
     enqueue_backfill_request,
@@ -38,6 +39,7 @@ from .relations import (
 PAGE_SIZE = 50
 MAX_PAGE = 100_000
 DEFAULT_MAX_BACKFILL_DAYS = 366
+DEFAULT_COVERAGE_DAYS = 365
 DEFAULT_TIMEZONE = "America/Lima"
 RELATION_LABELS = {
     "amends": "Modifica",
@@ -94,6 +96,13 @@ def _local_today() -> date:
     return datetime.now(zone).date()
 
 
+def _coverage(today: date) -> dict[str, object]:
+    return coverage_summary(
+        today,
+        target_days=_env_positive_int("RADAR_COVERAGE_DAYS", DEFAULT_COVERAGE_DAYS),
+    )
+
+
 def _admin_token() -> str:
     return os.getenv("RADAR_ADMIN_TOKEN", "").strip()
 
@@ -131,6 +140,7 @@ def create_app() -> Flask:
         )
         has_next = len(fetched) > PAGE_SIZE
         rows = fetched[:PAGE_SIZE]
+        today = _local_today()
         return render_template(
             "index.html",
             rows=rows,
@@ -140,6 +150,7 @@ def create_app() -> Flask:
             options=list_norm_filter_options(),
             stats=norm_stats(),
             date_bounds=norm_date_bounds(),
+            coverage=_coverage(today),
             pagination=_pagination(
                 "index",
                 page,
@@ -235,14 +246,18 @@ def create_app() -> Flask:
     @app.get("/status")
     def status_page():
         last_sync = latest_sync_run()
+        today = _local_today()
+        coverage = _coverage(today)
         return render_template(
             "status.html",
             stats=norm_stats(),
             date_bounds=norm_date_bounds(),
+            coverage=coverage,
             last_sync=dict(last_sync) if last_sync else None,
             sync_requests=[dict(row) for row in list_sync_requests(20)],
             admin_enabled=bool(_admin_token()),
-            today=_local_today().isoformat(),
+            today=today.isoformat(),
+            suggested_start=coverage["first_missing"] or "",
             max_backfill_days=_env_positive_int(
                 "RADAR_MAX_BACKFILL_DAYS", DEFAULT_MAX_BACKFILL_DAYS
             ),
@@ -302,10 +317,12 @@ def create_app() -> Flask:
     @app.get("/api/status")
     def status_api():
         last_sync = latest_sync_run()
+        today = _local_today()
         return {
             "status": "ok",
             "stats": norm_stats(),
             "date_bounds": norm_date_bounds(),
+            "coverage": _coverage(today),
             "last_sync": dict(last_sync) if last_sync else None,
             "sync_requests": [dict(row) for row in list_sync_requests(10)],
         }

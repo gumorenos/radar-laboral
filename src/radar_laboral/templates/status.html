@@ -36,6 +36,9 @@
     .notice-ok { background: #dcfce7; color: #166534; }
     .notice-error { background: #fee2e2; color: #991b1b; }
     .notice-warn { background: #fef3c7; color: #92400e; }
+    .progress { height: 12px; border-radius: 999px; background: #e5e7eb; overflow: hidden; margin: 12px 0 18px; }
+    .progress > div { height: 100%; background: #166534; min-width: 0; }
+    .gap-list { margin: 10px 0 0; padding-left: 20px; }
     .table-wrap { overflow-x: auto; }
     table { border-collapse: collapse; width: 100%; min-width: 760px; }
     th, td { padding: 9px 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; font-size: 13px; }
@@ -47,7 +50,7 @@
   <div class="top">
     <div>
       <h1>Estado del Radar</h1>
-      <p class="sub">Datos locales, cobertura histórica, cola de carga y última sincronización.</p>
+      <p class="sub">Datos locales, cobertura histórica verificable, cola de carga y última sincronización.</p>
     </div>
     <a href="/">← Volver a normas</a>
   </div>
@@ -57,9 +60,38 @@
     <div class="card"><div class="label">Relevantes</div><div class="value">{{ stats.relevant }}</div></div>
     <div class="card"><div class="label">Por revisar</div><div class="value">{{ stats.review }}</div></div>
     <div class="card"><div class="label">PDFs locales</div><div class="value">{{ stats.pdf_cached }}</div></div>
-    <div class="card"><div class="label">Primera fecha cargada</div><div class="value value-date">{{ date_bounds.earliest or '—' }}</div></div>
-    <div class="card"><div class="label">Última fecha cargada</div><div class="value value-date">{{ date_bounds.latest or '—' }}</div></div>
+    <div class="card"><div class="label">Primera norma almacenada</div><div class="value value-date">{{ date_bounds.earliest or '—' }}</div></div>
+    <div class="card"><div class="label">Última norma almacenada</div><div class="value value-date">{{ date_bounds.latest or '—' }}</div></div>
   </div>
+
+  <section class="panel">
+    <h2>Cobertura diaria verificada</h2>
+    <p class="sub">Esta métrica comprueba días realmente consultados y validados contra El Peruano; no se deduce solo de la primera y última norma almacenada. La ventana excluye hoy porque todavía pueden aparecer publicaciones durante el día.</p>
+    <div><strong>{{ coverage.verified_days }} / {{ coverage.target_days }} días</strong> · {{ coverage.coverage_percent }}%</div>
+    <div class="progress" aria-label="Cobertura {{ coverage.coverage_percent }}%"><div style="width: {{ coverage.coverage_percent }}%"></div></div>
+    <dl>
+      <dt>Ventana evaluada</dt><dd>{{ coverage.window_start }} → {{ coverage.window_end }}</dd>
+      <dt>Días verificados</dt><dd>{{ coverage.verified_days }}</dd>
+      <dt>Días faltantes</dt><dd>{{ coverage.missing_days }}</dd>
+      <dt>Primera fecha faltante</dt><dd>{{ coverage.first_missing or '—' }}</dd>
+      <dt>Última fecha faltante</dt><dd>{{ coverage.last_missing or '—' }}</dd>
+      <dt>Hoy consultado</dt><dd>{{ 'Sí' if coverage.today_checked else 'No' }}{% if coverage.today_check %} · {{ coverage.today_check.record_count }} documentos vistos; no cuenta aún como día histórico cerrado{% endif %}</dd>
+    </dl>
+
+    {% if coverage.missing_days == 0 %}
+      <div class="notice notice-ok">La ventana histórica configurada está completamente verificada.</div>
+    {% else %}
+      <div class="notice notice-warn">Hay huecos reales de cobertura. El selector de abajo propone empezar por <strong>{{ coverage.first_missing }}</strong>.</div>
+      <p><strong>Primeros huecos detectados:</strong></p>
+      <ul class="gap-list">
+        {% for gap in coverage.missing_ranges[:8] %}
+          <li>{{ gap.start }}{% if gap.end != gap.start %} → {{ gap.end }}{% endif %} · {{ gap.days }} día{% if gap.days != 1 %}s{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% if coverage.missing_ranges|length > 8 %}<p class="sub">Hay {{ coverage.missing_ranges|length - 8 }} rangos adicionales.</p>{% endif %}
+    {% endif %}
+    <p class="sub">Un día con cero publicaciones oficiales sí cuenta como verificado si El Peruano devuelve un estado vacío explícito y válido.</p>
+  </section>
 
   <section class="panel">
     <h2>Carga histórica de El Peruano</h2>
@@ -76,7 +108,7 @@
     <form class="sync-form" method="post" action="/admin/backfill">
       <div class="field">
         <label for="start_date">Traer desde</label>
-        <input id="start_date" type="date" name="start_date" max="{{ today }}" required {% if not admin_enabled %}disabled{% endif %}>
+        <input id="start_date" type="date" name="start_date" value="{{ suggested_start }}" max="{{ today }}" required {% if not admin_enabled %}disabled{% endif %}>
       </div>
       <div class="field">
         <label for="end_date">Hasta</label>
@@ -91,7 +123,7 @@
         <button type="submit" {% if not admin_enabled %}disabled{% endif %}>Encolar carga histórica</button>
       </div>
     </form>
-    <p class="sub">Máximo por solicitud: {{ max_backfill_days }} días. Para la primera carga conviene dejar los PDFs desmarcados y completar metadatos primero.</p>
+    <p class="sub">Máximo por solicitud: {{ max_backfill_days }} días. Para la primera carga conviene dejar los PDFs desmarcados y completar metadatos primero. Si incluyes hoy, ese día seguirá figurando como abierto hasta una revalidación posterior.</p>
   </section>
 
   <section class="panel">

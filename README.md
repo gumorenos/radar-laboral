@@ -28,8 +28,8 @@ Ver [`docs/content-model.md`](docs/content-model.md) para el diseño de estas re
 1. Catálogo SQLite con metadatos normalizados.
 2. Interfaz web para buscar, filtrar y paginar normas.
 3. Vista principal que muestra por defecto **laborales relevantes + documentos por revisar**, evitando ocultar señales laborales útiles.
-4. Cobertura temporal visible: primera y última fecha presentes en la base.
-5. Selector web para solicitar carga histórica de El Peruano desde una fecha, con cola persistente y worker separado.
+4. Cobertura diaria verificable de El Peruano: distingue días realmente consultados de una simple primera/última fecha almacenada y detecta huecos.
+5. Selector web que propone la primera fecha faltante y permite solicitar carga histórica, con cola persistente y worker separado.
 6. Biblioteca independiente de jurisprudencia con búsqueda, filtros, paginación y fichas.
 7. Cache local de PDF oficiales con SHA-256.
 8. Collector determinístico de El Peruano por fecha, incluyendo edición regular y extraordinaria.
@@ -52,7 +52,11 @@ Fuentes oficiales
       v                   v
  storage/pdfs/         SQLite local
       |                   |
-      +---------> aplicación web
+      |             +-----+-------------------+
+      |             |                         |
+      |        normas/jurisprudencia     cobertura por día
+      |             |                         |
+      +---------> aplicación web <------------+
                        |
                        v
                  cola sync_requests
@@ -102,11 +106,32 @@ También existe un proceso periódico:
 radar-laboral-sync-daemon
 ```
 
-Por defecto sincroniza cada 6 horas. Puede cambiarse con `RADAR_SYNC_INTERVAL_SECONDS`; el programa impone un mínimo de una hora para no consultar innecesariamente la fuente oficial.
+Por defecto sincroniza cada 6 horas. En cada ciclo consulta el día actual y, si el día anterior todavía no figura como cobertura histórica completa, lo revalida una vez antes de seguir con hoy. Esto evita considerar definitivo un resultado obtenido mientras El Peruano todavía podía publicar más documentos durante el mismo día. Puede cambiarse el intervalo con `RADAR_SYNC_INTERVAL_SECONDS`; el programa impone un mínimo de una hora.
+
+## Cobertura diaria verificable
+
+La primera y última fecha presentes en `norms` no demuestran que todos los días intermedios fueron realmente consultados. Radar mantiene por eso una tabla independiente `source_coverage_days` para El Peruano.
+
+Por cada fecha consultada exitosamente registra:
+
+- cantidad total de dispositivos;
+- relevantes y por revisar;
+- hora de comprobación;
+- si el día puede considerarse histórico **completo**.
+
+La ventana de cobertura termina **ayer**. Una consulta exitosa de hoy queda registrada como `checked`, pero todavía no como completa porque El Peruano puede añadir publicaciones más tarde. Cuando la fecha ya es histórica, el daemon o un backfill la revalidan y la cierran. Un día con cero publicaciones sí cuenta como completo cuando la fuente devuelve explícitamente su estado vacío válido. Si el collector falla, ese día no queda marcado como cubierto.
+
+La ventana esperada es de 365 días por defecto y puede ajustarse con:
+
+```text
+RADAR_COVERAGE_DAYS=365
+```
+
+`/status` muestra porcentaje, primera/última fecha faltante y rangos de huecos; el formulario histórico propone automáticamente la primera fecha faltante. Las instalaciones existentes **no** infieren cobertura retroactivamente desde sus normas ya guardadas: esas fechas deben revalidarse para que el indicador sea auditable.
 
 ## Carga histórica de El Peruano
 
-La sincronización diaria no sustituye un histórico: una instalación nueva puede contener solo días recientes y, si esos días tienen principalmente nombramientos u otros actos internos, la vista laboral puede quedar vacía. La pantalla `/status` muestra por eso la primera y última fecha cargadas y permite solicitar un rango histórico.
+La sincronización diaria no sustituye un histórico: una instalación nueva puede contener solo días recientes y, si esos días tienen principalmente nombramientos u otros actos internos, la vista laboral puede quedar vacía. La pantalla `/status` permite completar los huecos detectados por la cobertura diaria.
 
 El formulario web tiene dos fechas: **Traer desde** y **Hasta**. La solicitud no ejecuta el scraping dentro del request HTTP: se guarda en `sync_requests` y `radar-laboral-worker` la procesa en segundo plano. Si el worker reinicia, un trabajo interrumpido vuelve a la cola; repetir rangos no duplica documentos porque el collector usa `upsert`.
 
@@ -157,7 +182,7 @@ docker compose up -d --build
 Compose usa tres procesos basados en la misma imagen:
 
 - `radar-laboral`: interfaz web;
-- `radar-laboral-sync`: sincronizador periódico de El Peruano;
+- `radar-laboral-sync`: sincronizador periódico de El Peruano y cierre del día anterior;
 - `radar-laboral-worker`: procesa la cola persistente de cargas históricas.
 
 Los tres comparten `./storage:/data`. Allí quedan de forma persistente:
@@ -176,14 +201,14 @@ La interfaz se publica únicamente en `127.0.0.1:8080`, deliberadamente pensada 
 ## Estado y diagnóstico
 
 - `/healthz`: healthcheck mínimo para Docker.
-- `/status`: registros, cobertura temporal, carga histórica, cola y última sincronización.
-- `/api/status`: estado equivalente en JSON, sin secretos.
+- `/status`: registros, cobertura diaria verificada, huecos, carga histórica, cola y última sincronización.
+- `/api/status`: estado equivalente en JSON, incluida la cobertura, sin secretos.
 - [`docs/QA_PENDING.md`](docs/QA_PENDING.md): pruebas que requieren Raspberry, fuente real o Cloudflare.
 - [`docs/QA_TFL.md`](docs/QA_TFL.md): QA del collector SUNAFIL TFL.
 
 ## Actualizar una instalación existente
 
-El directorio `storage/` no se borra al actualizar el código. Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación, incluidos nuevos objetos como `sync_requests` y reclasificaciones por versión.
+El directorio `storage/` no se borra al actualizar el código. Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación. La tabla de cobertura se crea automáticamente al utilizar la funcionalidad; no se asume que fechas antiguas estén cubiertas solo porque existan normas almacenadas.
 
 ```bash
 git switch main
@@ -194,4 +219,4 @@ docker compose ps
 
 ## Estado del proyecto
 
-Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, collectors determinísticos de El Peruano y SUNAFIL TFL, clasificación laboral versionada, cache verificable de PDFs, sincronización automática, carga histórica encolada, biblioteca de jurisprudencia y relaciones entre documentos. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
+Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, collectors determinísticos de El Peruano y SUNAFIL TFL, clasificación laboral versionada, cache verificable de PDFs, sincronización automática, cobertura diaria auditable, carga histórica encolada, biblioteca de jurisprudencia y relaciones entre documentos. Las siguientes fuentes y funcionalidades se incorporarán por etapas.

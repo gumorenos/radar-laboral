@@ -65,6 +65,9 @@ class HistoricalBackfillTests(unittest.TestCase):
             with patch(
                 "radar_laboral.collectors.el_peruano_history.fetch_day",
                 return_value=[dict(LABOR_RECORD)],
+            ), patch(
+                "radar_laboral.collectors.el_peruano_history.local_today",
+                return_value=date(2026, 8, 24),
             ):
                 first = backfill(
                     date(2026, 8, 1),
@@ -97,11 +100,45 @@ class HistoricalBackfillTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM sync_runs WHERE source = 'El Peruano histórico' "
                     "AND status = 'success'"
                 ).fetchone()[0]
+                coverage = conn.execute(
+                    """
+                    SELECT record_count, relevant_count, review_count, is_complete
+                    FROM source_coverage_days
+                    WHERE source = 'El Peruano' AND coverage_date = '2026-08-01'
+                    """
+                ).fetchone()
 
             self.assertEqual(norm_count, 1)
             self.assertEqual(sync_count, 2)
+            self.assertEqual(coverage, (1, 1, 0, 1))
 
-    def test_failed_fetch_is_recorded_as_failed_sync(self) -> None:
+    def test_successful_empty_day_is_still_covered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
+            with patch(
+                "radar_laboral.collectors.el_peruano_history.fetch_day",
+                return_value=[],
+            ), patch(
+                "radar_laboral.collectors.el_peruano_history.local_today",
+                return_value=date(2026, 8, 24),
+            ):
+                records = backfill(
+                    date(2026, 8, 2),
+                    date(2026, 8, 2),
+                    download_pdfs=False,
+                    catalog_path=Path(tmp) / "catalog" / "norms.jsonl",
+                    page_delay_seconds=0,
+                    day_delay_seconds=0,
+                )
+
+            self.assertEqual(records, [])
+            with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
+                row = conn.execute(
+                    "SELECT record_count, is_complete FROM source_coverage_days "
+                    "WHERE coverage_date = '2026-08-02'"
+                ).fetchone()
+            self.assertEqual(row, (0, 1))
+
+    def test_failed_fetch_is_recorded_as_failed_sync_without_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
             with patch(
                 "radar_laboral.collectors.el_peruano_history.fetch_day",
@@ -121,9 +158,19 @@ class HistoricalBackfillTests(unittest.TestCase):
                 row = conn.execute(
                     "SELECT status, error FROM sync_runs ORDER BY id DESC LIMIT 1"
                 ).fetchone()
+                table_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'source_coverage_days'"
+                ).fetchone()
+                coverage_count = (
+                    conn.execute("SELECT COUNT(*) FROM source_coverage_days").fetchone()[0]
+                    if table_exists
+                    else 0
+                )
 
             self.assertEqual(row[0], "failed")
             self.assertIn("source unavailable", row[1])
+            self.assertEqual(coverage_count, 0)
 
 
 if __name__ == "__main__":
