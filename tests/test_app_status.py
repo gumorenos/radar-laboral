@@ -165,14 +165,14 @@ class AppStatusTests(unittest.TestCase):
         self.assertIn(b"Norma paginada 01", second.data)
         self.assertIn(b"Norma paginada 00", second.data)
         self.assertNotIn(b"Norma paginada 02", second.data)
-        self.assertIn(b"PÃP\xc3¡P\xc3\xa1gina 2", second.data)
+        self.assertIn("Página 2".encode(), second.data)
         self.assertIn(b"Anterior", second.data)
         self.assertNotIn(b"page=3", second.data)
 
     def test_invalid_page_falls_back_to_first_page(self) -> None:
         response = self.client.get("/", query_string={"page": "abc"})
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn(b"PÃP\xc3¡P\xc3\xa1gina 2", response.data)
+        self.assertNotIn("Página 2".encode(), response.data)
 
     def test_status_api_reports_latest_sync(self) -> None:
         run_id = start_sync_run("El Peruano")
