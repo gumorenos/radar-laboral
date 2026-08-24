@@ -8,7 +8,7 @@ El objetivo del proyecto no es reemplazar a El Peruano, MTPE, SUNAFIL, el Tribun
 
 - **Fuente primero:** cada registro conserva URL oficial, URL del PDF y hash del archivo descargado cuando existe copia local.
 - **Determinístico por defecto:** captura, almacenamiento, búsqueda y clasificación básica no requieren IA.
-- **Ligero:** una aplicación Python, SQLite y una interfaz web simple.
+- **Ligero:** Python, SQLite y una interfaz web simple.
 - **Portable:** el mismo código debe correr en Linux, Docker y, más adelante, como ejecutable portable para Windows.
 - **Reproducible:** los catálogos pueden exportarse/versionarse como texto; la base SQLite y los PDF se reconstruyen o descargan localmente.
 - **Extensible:** conceptos, IA, búsqueda semántica y resúmenes pueden añadirse por capas sin convertirse en la fuente de verdad.
@@ -27,16 +27,19 @@ Ver [`docs/content-model.md`](docs/content-model.md) para el diseño de estas re
 
 1. Catálogo SQLite con metadatos normalizados.
 2. Interfaz web para buscar, filtrar y paginar normas.
-3. Biblioteca independiente de jurisprudencia con búsqueda, filtros, paginación y fichas.
-4. Cache local de PDF oficiales con SHA-256.
-5. Collector determinístico de El Peruano por fecha, incluyendo edición regular y extraordinaria.
-6. Clasificación determinística de relevancia laboral.
-7. Sincronización periódica, deduplicación y registro de ejecuciones.
-8. Backfill histórico de El Peruano por rango de fechas.
-9. Collector de Resoluciones de Sala Plena del Tribunal de Fiscalización Laboral de SUNAFIL.
-10. Relaciones auditables entre normas y jurisprudencia.
-11. Docker para servidor Linux.
-12. Preparación para empaquetado portable en Windows.
+3. Vista principal que muestra por defecto **laborales relevantes + documentos por revisar**, evitando ocultar señales laborales útiles.
+4. Cobertura temporal visible: primera y última fecha presentes en la base.
+5. Selector web para solicitar carga histórica de El Peruano desde una fecha, con cola persistente y worker separado.
+6. Biblioteca independiente de jurisprudencia con búsqueda, filtros, paginación y fichas.
+7. Cache local de PDF oficiales con SHA-256.
+8. Collector determinístico de El Peruano por fecha, incluyendo edición regular y extraordinaria.
+9. Clasificación determinística de relevancia laboral, versionada y migrable.
+10. Sincronización periódica, deduplicación y registro de ejecuciones.
+11. Backfill histórico de El Peruano por rango de fechas.
+12. Collector de Resoluciones de Sala Plena del Tribunal de Fiscalización Laboral de SUNAFIL.
+13. Relaciones auditables entre normas y jurisprudencia.
+14. Docker para servidor Linux.
+15. Preparación para empaquetado portable en Windows.
 
 ## Arquitectura
 
@@ -44,12 +47,18 @@ Ver [`docs/content-model.md`](docs/content-model.md) para el diseño de estas re
 Fuentes oficiales
       |
       v
-  collectors  ---> catálogos JSONL
-      |                 |
-      v                 v
- storage/pdfs/       SQLite local
-      |                 |
-      +-------> aplicación web
+ collectors  -----> catálogos JSONL
+      |                   |
+      v                   v
+ storage/pdfs/         SQLite local
+      |                   |
+      +---------> aplicación web
+                       |
+                       v
+                 cola sync_requests
+                       |
+                       v
+                 worker histórico
 ```
 
 Ver [`docs/architecture.md`](docs/architecture.md) para las decisiones iniciales.
@@ -97,23 +106,31 @@ Por defecto sincroniza cada 6 horas. Puede cambiarse con `RADAR_SYNC_INTERVAL_SE
 
 ## Carga histórica de El Peruano
 
-El backfill histórico reutiliza exactamente el mismo collector por fecha que la sincronización diaria. Esto evita tener dos parsers distintos para la misma fuente y conserva las mismas reglas de integridad para `NL` y `EX`.
+La sincronización diaria no sustituye un histórico: una instalación nueva puede contener solo días recientes y, si esos días tienen principalmente nombramientos u otros actos internos, la vista laboral puede quedar vacía. La pantalla `/status` muestra por eso la primera y última fecha cargadas y permite solicitar un rango histórico.
 
-Ejemplo, primero solo metadatos:
+El formulario web tiene dos fechas: **Traer desde** y **Hasta**. La solicitud no ejecuta el scraping dentro del request HTTP: se guarda en `sync_requests` y `radar-laboral-worker` la procesa en segundo plano. Si el worker reinicia, un trabajo interrumpido vuelve a la cola; repetir rangos no duplica documentos porque el collector usa `upsert`.
+
+Como el sitio puede estar detrás de un Cloudflare Tunnel público, el POST de carga histórica está deshabilitado salvo que exista una clave administrativa fuerte:
+
+```text
+RADAR_ADMIN_TOKEN=<secreto-largo-y-aleatorio>
+```
+
+Docker Compose lee ese valor del entorno del host o de un archivo `.env` local que **no debe versionarse**. El selector sigue visible cuando la clave no está configurada, pero aparece deshabilitado. El rango máximo por solicitud es 366 días por defecto y puede cambiarse con `RADAR_MAX_BACKFILL_DAYS`.
+
+Para una primera carga histórica se recomienda **solo metadatos**; luego pueden completarse PDFs laborales en un rango menor. La CLI tradicional sigue disponible:
 
 ```bash
 radar-laboral-backfill --from 2026-01-01 --to 2026-01-31 --no-pdf
 ```
 
-Luego, si se desea completar las copias locales de documentos laborales del mismo rango:
+El rango es inclusivo, se procesa día por día y conserva edición `regular` / `extraordinary`. La prueba de integración conocida para el **1 de agosto de 2026** es 124 dispositivos `NL` + 16 `EX` = **140 dispositivos**.
 
-```bash
-radar-laboral-backfill --from 2026-01-01 --to 2026-01-31
-```
+## Clasificación laboral
 
-El rango es inclusivo, se procesa día por día y el `upsert` permite repetir una carga sin duplicar registros por OP. Los metadatos de edición (`regular` / `extraordinary`) se conservan en el catálogo JSONL.
+La clasificación es conservadora y versionada. La portada usa `tracked`, que incluye tanto `relevant` como `review`; los actos identificados como administrativos siguen ocultos en esa vista, pero permanecen en el inventario SQLite.
 
-La prueba de integración conocida para el **1 de agosto de 2026** es 124 dispositivos `NL` + 16 `EX` = **140 dispositivos**.
+La versión 3 amplía señales específicas de inspección laboral (`función inspectiva`, Sistema/Ley General de Inspección del Trabajo) y, a la vez, reconoce más patrones de nombramientos, conclusiones de designación y encargaturas. Al iniciar una versión nueva, SQLite reclasifica automáticamente filas generadas con una versión anterior del clasificador.
 
 ## SUNAFIL — Tribunal de Fiscalización Laboral
 
@@ -125,9 +142,9 @@ radar-laboral-sync-tfl --all-pages --no-pdf
 
 El modo normal procesa solo la primera página del listado para reducir tráfico. `--all-pages` recorre el histórico disponible y `--refresh-details` vuelve a consultar detalles ya almacenados.
 
-Los registros usan IDs estables derivados del recurso oficial de `gob.pe`, por ejemplo `sunafil-tfl:6556395`. El collector conserva número, fecha, sumilla oficial, fuente, PDF y SHA-256 cuando existe copia local. `binding_level` solo se informa cuando el texto oficial declara expresamente una fuerza o alcance obligatorio; el sistema no lo infiere por el tipo de resolución.
+Los registros usan IDs estables derivados del recurso oficial de `gob.pe`. El collector conserva número, fecha, sumilla oficial, fuente, PDF y SHA-256 cuando existe copia local. `binding_level` solo se informa cuando el texto oficial declara expresamente una fuerza o alcance obligatorio; el sistema no lo infiere por el tipo de resolución.
 
-El gate live de creación del collector validó 53 resoluciones disponibles en ese momento y la Resolución de Sala Plena `001-2025-SUNAFIL-TFL`, incluida su sumilla completa, su declaración de precedente administrativo de observancia obligatoria y su PDF oficial. Ver [`docs/QA_TFL.md`](docs/QA_TFL.md).
+Ver [`docs/QA_TFL.md`](docs/QA_TFL.md) para el gate real ya ejecutado.
 
 ## Docker
 
@@ -137,12 +154,13 @@ Despliegue recomendado:
 docker compose up -d --build
 ```
 
-Compose levanta dos procesos basados en la misma imagen:
+Compose usa tres procesos basados en la misma imagen:
 
 - `radar-laboral`: interfaz web;
-- `radar-laboral-sync`: sincronizador periódico de El Peruano.
+- `radar-laboral-sync`: sincronizador periódico de El Peruano;
+- `radar-laboral-worker`: procesa la cola persistente de cargas históricas.
 
-Ambos comparten `./storage:/data`. Allí quedan de forma persistente:
+Los tres comparten `./storage:/data`. Allí quedan de forma persistente:
 
 ```text
 storage/
@@ -153,27 +171,19 @@ storage/
 └── pdfs/
 ```
 
-La interfaz se publica únicamente en `127.0.0.1:8080`, no en todas las interfaces de red. Esto es deliberado y funciona bien detrás de un reverse proxy o Cloudflare Tunnel.
-
-Para Cloudflare Tunnel, el origen puede apuntar a:
-
-```text
-http://localhost:8080
-```
-
-No es necesario abrir el puerto 8080 en el router ni exponerlo directamente a Internet.
+La interfaz se publica únicamente en `127.0.0.1:8080`, deliberadamente pensada para un reverse proxy o Cloudflare Tunnel.
 
 ## Estado y diagnóstico
 
 - `/healthz`: healthcheck mínimo para Docker.
-- `/status`: resumen visual de registros, PDFs y última sincronización.
-- `/api/status`: la misma información en JSON.
+- `/status`: registros, cobertura temporal, carga histórica, cola y última sincronización.
+- `/api/status`: estado equivalente en JSON, sin secretos.
 - [`docs/QA_PENDING.md`](docs/QA_PENDING.md): pruebas que requieren Raspberry, fuente real o Cloudflare.
 - [`docs/QA_TFL.md`](docs/QA_TFL.md): QA del collector SUNAFIL TFL.
 
 ## Actualizar una instalación existente
 
-El directorio `storage/` no se borra al actualizar el código.
+El directorio `storage/` no se borra al actualizar el código. Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación, incluidos nuevos objetos como `sync_requests` y reclasificaciones por versión.
 
 ```bash
 git switch main
@@ -182,8 +192,6 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Las migraciones ligeras de SQLite se ejecutan al iniciar la aplicación. Los PDFs y la base local permanecen en el volumen persistente.
-
 ## Estado del proyecto
 
-Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, collectors determinísticos de El Peruano y SUNAFIL TFL, clasificación laboral, cache verificable de PDFs, sincronización automática de El Peruano, backfill histórico, biblioteca de jurisprudencia y relaciones entre documentos. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
+Proyecto en construcción. La base actual incluye aplicación web, modelo de datos, collectors determinísticos de El Peruano y SUNAFIL TFL, clasificación laboral versionada, cache verificable de PDFs, sincronización automática, carga histórica encolada, biblioteca de jurisprudencia y relaciones entre documentos. Las siguientes fuentes y funcionalidades se incorporarán por etapas.
