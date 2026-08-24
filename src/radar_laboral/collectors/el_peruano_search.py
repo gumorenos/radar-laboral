@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup, Tag
 
+from radar_laboral.coverage import mark_coverage_day
 from radar_laboral.db import (
     enrich_norm,
     finish_sync_run,
@@ -333,6 +334,13 @@ def collect(
         latest_date = max(
             (str(item.get("publication_date")) for item in stored_records if item.get("publication_date")),
             default=None,
+        )
+        mark_coverage_day(
+            target_day,
+            record_count=len(stored_records),
+            relevant_count=relevant_count,
+            review_count=review_count,
+            is_complete=target_day < local_today(),
         )
         finish_sync_run(
             run_id,
