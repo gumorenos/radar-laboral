@@ -7,6 +7,14 @@ Este archivo registra pruebas que requieren Raspberry Pi, Cloudflare o el volume
 - Collector de El Peruano validado contra fuente real para `NL` + `EX`.
 - Gate histórico **2026-08-01**: 124 `NL` + 16 `EX` = **140 dispositivos**.
 - Consulta explícitamente vacía validada como éxito con 0, sin borrar catálogo.
+- Gate live de visibilidad laboral **2026-07-22 a 2026-07-23**:
+  - 146 documentos reales cargados a SQLite sin PDFs;
+  - 3 `relevant`, 5 `review`, 138 `not_labor` con clasificador v3;
+  - `DS 009-2026-TR` publicado el 2026-07-22 quedó `relevant / Teletrabajo`;
+  - `RM 194-2026-TR` publicado en El Peruano el 2026-07-23 quedó `relevant / Inspección laboral`;
+  - ambos controles aparecieron en la portada Flask con el default **Laborales + por revisar** y también con `Solo laborales relevantes`;
+  - `/api/status` reportó cobertura `2026-07-22` → `2026-07-23`.
+- Nota de calidad de fuente: la tarjeta oficial de El Peruano para `DS 009-2026-TR` reportó el emisor `SECRETARIA DEL CONSEJO DE MINISTROS`. Radar conserva ese metadato de origen y no lo reemplaza silenciosamente por una inferencia basada en el sufijo `-TR`; su clasificación laboral se sostiene por el contenido de Teletrabajo.
 - SUNAFIL TFL tiene su gate live documentado en [`QA_TFL.md`](QA_TFL.md).
 - La cola `sync_requests`, autenticación del POST, recuperación tras reinicio y worker histórico están cubiertos con SQLite temporal y mocks en CI.
 - El clasificador es versionado: una nueva versión fuerza reclasificación de filas antiguas al iniciar.
@@ -53,17 +61,15 @@ Criterios:
 - la primera fecha cargada retrocede al rango solicitado;
 - una solicitud idéntica mientras está activa no se duplica.
 
-## 4. Visibilidad de normas laborales
+## 4. Visibilidad de normas laborales en Raspberry
 
-Después del backfill histórico:
+La lógica ya pasó el gate real desde GitHub Actions. Después del backfill desplegado, confirmar además en el entorno persistente:
 
 - la portada abre por defecto **Laborales + por revisar**;
 - muestra filas `relevant` y `review`, pero no `not_labor`;
 - el resumen superior informa relevantes, por revisar, inventario total y cobertura temporal;
 - el filtro **Solo laborales relevantes** sigue disponible;
-- actos administrativos de nombramiento/designación continúan fuera de la vista laboral.
-
-Control recomendado: confirmar que una norma sustantiva de teletrabajo cargada históricamente aparezca como `relevant` y que documentos de función inspectiva queden en **Inspección laboral** cuando el texto oficial contenga esas señales.
+- la carga de un rango que incluya 22–23 de julio de 2026 permite localizar `009-2026-TR` y `194-2026-TR`.
 
 ## 5. Reinicio durante una carga
 
