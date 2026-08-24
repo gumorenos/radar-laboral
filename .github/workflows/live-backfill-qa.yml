@@ -53,12 +53,12 @@ jobs:
           assert by_edition.get("extraordinary") == 16, by_edition
           assert tuple(sync) == ("success", 140), tuple(sync)
           PY
-      - name: Validate explicit empty day
+      - name: Validate explicit no-results response
         env:
           RADAR_DATA_DIR: ${{ runner.temp }}/radar-live
           RADAR_CATALOG_PATH: ${{ runner.temp }}/radar-live/catalog/norms.jsonl
         run: |
-          radar-laboral-sync --date 2026-08-23 --no-pdf
+          radar-laboral-sync --date 2026-12-31 --no-pdf
           python - <<'PY'
           from radar_laboral.db import connect
 
@@ -67,6 +67,6 @@ jobs:
                   "SELECT status, records_seen FROM sync_runs "
                   "WHERE source = 'El Peruano' ORDER BY id DESC LIMIT 1"
               ).fetchone()
-          print("empty-day sync:", tuple(sync))
+          print("no-results sync:", tuple(sync))
           assert tuple(sync) == ("success", 0), tuple(sync)
           PY
