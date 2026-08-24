@@ -41,8 +41,6 @@ CREATE INDEX IF NOT EXISTS idx_norms_source
     ON norms(source);
 CREATE INDEX IF NOT EXISTS idx_norms_topic
     ON norms(topic);
-CREATE INDEX IF NOT EXISTS idx_norms_edition
-    ON norms(edition);
 
 CREATE TABLE IF NOT EXISTS case_law (
     id TEXT PRIMARY KEY,
