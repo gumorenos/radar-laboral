@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ case.document_type or 'Jurisprudencia' }} {{ case.number or case.docket_number or '' }} · Radar Laboral Perú</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f7f7f8; color: #222; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; }
+    .topbar { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+    .eyebrow { color: #666; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+    h1 { margin: 8px 0 6px; line-height: 1.2; }
+    .title { font-size: 20px; margin: 0 0 20px; color: #444; }
+    .card { background: white; border: 1px solid #e4e4e7; border-radius: 12px; padding: 20px; margin: 16px 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px 22px; }
+    .field dt { font-size: 12px; color: #666; font-weight: 700; margin-bottom: 4px; }
+    .field dd { margin: 0; overflow-wrap: anywhere; }
+    .muted { color: #666; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    .button { display: inline-block; padding: 9px 12px; border: 1px solid #ccc; border-radius: 8px; text-decoration: none; background: white; }
+    .button-primary { background: #222; color: white; border-color: #222; }
+    .relation-list { list-style: none; margin: 0; padding: 0; }
+    .relation-list li { padding: 13px 0; border-bottom: 1px solid #eee; }
+    .relation-list li:last-child { border-bottom: 0; }
+    .relation-meta { color: #666; font-size: 13px; margin-top: 4px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="topbar"><a href="/jurisprudencia">← Volver a jurisprudencia</a><a href="/">Normas</a></div>
+
+  <div class="eyebrow">{{ case.source }} · {{ case.court }}</div>
+  <h1>{{ case.document_type or 'Pronunciamiento' }}{% if case.number %} {{ case.number }}{% elif case.docket_number %} {{ case.docket_number }}{% endif %}</h1>
+  <p class="title">{{ case.title }}</p>
+
+  <section class="card">
+    <h2>Datos del pronunciamiento</h2>
+    <dl class="grid">
+      <div class="field"><dt>Órgano / tribunal</dt><dd>{{ case.court }}</dd></div>
+      <div class="field"><dt>Expediente</dt><dd>{{ case.docket_number or '—' }}</dd></div>
+      <div class="field"><dt>Número</dt><dd>{{ case.number or '—' }}</dd></div>
+      <div class="field"><dt>Fecha de decisión</dt><dd>{{ case.decision_date or '—' }}</dd></div>
+      <div class="field"><dt>Fecha de publicación</dt><dd>{{ case.publication_date or '—' }}</dd></div>
+      <div class="field"><dt>Tema</dt><dd>{{ case.topic or '—' }}</dd></div>
+      <div class="field"><dt>Fuerza / alcance registrado</dt><dd>{{ case.binding_level or 'No determinado' }}</dd></div>
+    </dl>
+    {% if case.summary %}<h3>Criterio / sumilla</h3><p>{{ case.summary }}</p>{% endif %}
+    <p class="muted">La fuerza o alcance mostrado proviene del dato almacenado para este registro; Radar Laboral no presume que un pronunciamiento sea vinculante.</p>
+  </section>
+
+  <section class="card">
+    <h2>Fuente y trazabilidad</h2>
+    <dl class="grid">
+      <div class="field"><dt>Fuente</dt><dd>{{ case.source }}</dd></div>
+      <div class="field"><dt>Capturado</dt><dd>{{ case.captured_at or '—' }}</dd></div>
+      <div class="field"><dt>Actualizado</dt><dd>{{ case.updated_at or '—' }}</dd></div>
+      <div class="field"><dt>SHA-256 del PDF local</dt><dd>{% if case.sha256 %}<code>{{ case.sha256 }}</code>{% else %}—{% endif %}</dd></div>
+    </dl>
+    <div class="actions">
+      <a class="button button-primary" href="{{ case.official_url }}" target="_blank" rel="noreferrer">Abrir fuente oficial</a>
+      {% if case.pdf_url or case.pdf_path %}<a class="button" href="/jurisprudencia/{{ case.id }}/pdf" target="_blank">Abrir PDF</a>{% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Normas relacionadas</h2>
+    {% if related_norms %}
+      <ul class="relation-list">
+        {% for item in related_norms %}
+          <li>
+            <a href="/norm/{{ item.id }}"><strong>{{ item.document_type or 'Norma' }} {{ item.number or '' }}</strong> · {{ item.title }}</a>
+            <div class="relation-meta">
+              {{ relation_labels.get(item.relation_type, item.relation_type) }} · {{ 'desde este pronunciamiento' if item.relation_direction == 'outgoing' else 'hacia este pronunciamiento' }}
+              {% if item.note %} · {{ item.note }}{% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No hay normas relacionadas registradas todavía.</p>
+    {% endif %}
+  </section>
+</main>
+</body>
+</html>
