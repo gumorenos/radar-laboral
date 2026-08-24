@@ -1,9 +1,9 @@
 name: live-backfill-qa
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/historical-backfill-v2
+      - main
 
 jobs:
   live-backfill:
