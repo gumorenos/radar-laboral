@@ -1,9 +1,9 @@
 name: semantic-e5-benchmark-qa
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - qa/semantic-e5-benchmark
 
 jobs:
   semantic-benchmark:
