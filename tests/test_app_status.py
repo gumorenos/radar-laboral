@@ -9,7 +9,15 @@ from radar_laboral.app import create_app
 from radar_laboral.db import finish_sync_run, start_sync_run, upsert_norm
 
 
-def _record(record_id: str, title: str, issuer: str, document_type: str = "RESOLUCIÓN") -> dict[str, object]:
+def _record(
+    record_id: str,
+    title: str,
+    issuer: str,
+    document_type: str = "RESOLUCIÓN",
+    *,
+    publication_date: str = "2026-08-23",
+    edition: str = "regular",
+) -> dict[str, object]:
     return {
         "id": record_id,
         "source": "El Peruano",
@@ -17,17 +25,18 @@ def _record(record_id: str, title: str, issuer: str, document_type: str = "RESOL
         "number": None,
         "title": title,
         "summary": None,
-        "publication_date": "2026-08-23",
+        "publication_date": publication_date,
         "effective_date": None,
         "issuer": issuer,
         "topic": None,
         "status": None,
+        "edition": edition,
         "official_url": f"https://example.invalid/{record_id}",
         "pdf_url": None,
         "pdf_path": None,
         "sha256": None,
-        "captured_at": "2026-08-23T05:00:00+00:00",
-        "updated_at": "2026-08-23T05:00:00+00:00",
+        "captured_at": f"{publication_date}T05:00:00+00:00",
+        "updated_at": f"{publication_date}T05:00:00+00:00",
     }
 
 
@@ -79,6 +88,47 @@ class AppStatusTests(unittest.TestCase):
         self.assertNotIn(b"lineamientos institucionales", response.data)
         self.assertNotIn(b"trabajadores de la entidad", response.data)
         self.assertIn(b"Solo laborales relevantes", response.data)
+        self.assertIn(b"Filtros avanzados", response.data)
+
+    def test_home_applies_advanced_filters(self) -> None:
+        upsert_norm(
+            _record(
+                "regular",
+                "Regulan teletrabajo regular",
+                "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                "DECRETO SUPREMO",
+                publication_date="2026-08-20",
+                edition="regular",
+            )
+        )
+        upsert_norm(
+            _record(
+                "extraordinary",
+                "Regulan jornada laboral extraordinaria",
+                "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                "RESOLUCIÓN MINISTERIAL",
+                publication_date="2026-08-21",
+                edition="extraordinary",
+            )
+        )
+
+        response = self.client.get(
+            "/",
+            query_string={
+                "relevance": "all",
+                "edition": "extraordinary",
+                "document_type": "RESOLUCIÓN MINISTERIAL",
+                "date_from": "2026-08-21",
+                "date_to": "2026-08-21",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"jornada laboral extraordinaria", response.data)
+        self.assertNotIn(b"teletrabajo regular", response.data)
+        self.assertIn(b"Filtros avanzados", response.data)
+        self.assertIn(b"activos", response.data)
+        self.assertIn(b"Extraordinaria", response.data)
 
     def test_status_api_reports_latest_sync(self) -> None:
         run_id = start_sync_run("El Peruano")
