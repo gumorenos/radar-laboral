@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from radar_laboral.classifier import CLASSIFIER_VERSION
-from radar_laboral.db import init_db
+from radar_laboral.db import init_db, upsert_norm
 
 
 LEGACY_SCHEMA = """
@@ -70,6 +70,20 @@ class DatabaseMigrationTests(unittest.TestCase):
             else:
                 os.environ["RADAR_DATA_DIR"] = old_value
 
+    def _with_data_dir(self, tmp: str):
+        class EnvGuard:
+            def __enter__(inner_self):
+                inner_self.old = os.environ.get("RADAR_DATA_DIR")
+                os.environ["RADAR_DATA_DIR"] = tmp
+
+            def __exit__(inner_self, exc_type, exc, tb):
+                if inner_self.old is None:
+                    os.environ.pop("RADAR_DATA_DIR", None)
+                else:
+                    os.environ["RADAR_DATA_DIR"] = inner_self.old
+
+        return EnvGuard()
+
     def test_legacy_database_is_migrated_and_backfilled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "radar_laboral.db"
@@ -107,6 +121,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             self.assertIn("labor_relevance", columns)
             self.assertIn("relevance_reason", columns)
             self.assertIn("classification_version", columns)
+            self.assertIn("edition", columns)
             self.assertEqual(row[0], "relevant")
             self.assertIn("materia laboral específica", row[1])
             self.assertIn("Teletrabajo", row[2])
@@ -147,9 +162,36 @@ class DatabaseMigrationTests(unittest.TestCase):
                     "SELECT labor_relevance, classification_version FROM norms "
                     "WHERE id = 'legacy:generic'"
                 ).fetchone()
+                columns = {item[1] for item in conn.execute("PRAGMA table_info(norms)")}
 
             self.assertEqual(row[0], "not_labor")
             self.assertEqual(row[1], CLASSIFIER_VERSION)
+            self.assertIn("edition", columns)
+
+    def test_upsert_persists_edition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, self._with_data_dir(tmp):
+            init_db()
+            upsert_norm(
+                {
+                    "id": "edition:1",
+                    "source": "El Peruano",
+                    "document_type": "DECRETO SUPREMO",
+                    "number": "001-2026-TR",
+                    "title": "Modifican disposiciones sobre teletrabajo",
+                    "publication_date": "2026-08-22",
+                    "issuer": "TRABAJO Y PROMOCIÓN DEL EMPLEO",
+                    "edition": "extraordinary",
+                    "official_url": "https://example.invalid/edition-1",
+                    "captured_at": "2026-08-22T00:00:00+00:00",
+                }
+            )
+
+            with sqlite3.connect(Path(tmp) / "radar_laboral.db") as conn:
+                edition = conn.execute(
+                    "SELECT edition FROM norms WHERE id = 'edition:1'"
+                ).fetchone()[0]
+
+            self.assertEqual(edition, "extraordinary")
 
 
 if __name__ == "__main__":
