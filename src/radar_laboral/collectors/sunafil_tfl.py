@@ -211,25 +211,62 @@ def _detail_heading(soup: BeautifulSoup) -> str | None:
     return None
 
 
+def _useful_summary(text: str, heading: str | None) -> str | None:
+    text = _clean(text)
+    if len(text) < 35 or text == heading or SPANISH_DATE_RE.fullmatch(text):
+        return None
+    lowered = text.casefold()
+    if "plataforma digital única" in lowered or "¿no encuentras lo que buscas?" in lowered:
+        return None
+    return text
+
+
 def _detail_summary(soup: BeautifulSoup, heading: str | None) -> str | None:
+    """Extract the complete official description without inferring missing text.
+
+    Gob.pe currently renders a truncated paragraph for some rules but keeps the full
+    description inside ``div.description.rule-content`` and in the share button's
+    ``data-contents`` attribute. Prefer those complete official fields; metadata is
+    only a final fallback because its description may be ellipsized.
+    """
+    description = soup.select_one("div.description.rule-content")
+    if isinstance(description, Tag):
+        candidates: list[str] = []
+        for node in description.find_all(["div", "p"]):
+            text = _useful_summary(node.get_text(" ", strip=True), heading)
+            if not text:
+                continue
+            lowered = text.casefold()
+            if " descargar" in f" {lowered}" or re.search(r"\bPDF\s+\d", text, re.I):
+                continue
+            candidates.append(text)
+        complete = [text for text in candidates if not text.rstrip().endswith(("...", "…"))]
+        if complete:
+            return max(complete, key=len)
+        if candidates:
+            return max(candidates, key=len)
+
+    share = soup.select_one("button.js-share[data-contents]")
+    if isinstance(share, Tag):
+        text = _useful_summary(str(share.get("data-contents") or ""), heading)
+        if text:
+            return text
+
     main = soup.find("main") or soup
-    candidates: list[str] = []
+    candidates = []
     for node in main.find_all("p"):
-        text = _clean(node.get_text(" ", strip=True))
-        if len(text) < 35 or text == heading or SPANISH_DATE_RE.fullmatch(text):
-            continue
-        lowered = text.casefold()
-        if "plataforma digital única" in lowered or "¿no encuentras lo que buscas?" in lowered:
-            continue
-        candidates.append(text)
+        text = _useful_summary(node.get_text(" ", strip=True), heading)
+        if text:
+            candidates.append(text)
+    complete = [text for text in candidates if not text.rstrip().endswith(("...", "…"))]
+    if complete:
+        return max(complete, key=len)
     if candidates:
         return max(candidates, key=len)
 
     meta = soup.find("meta", attrs={"name": "description"})
     if meta and meta.get("content"):
-        text = _clean(str(meta.get("content")))
-        if len(text) >= 35:
-            return text
+        return _useful_summary(str(meta.get("content")), heading)
     return None
 
 
