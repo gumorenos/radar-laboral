@@ -5,7 +5,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from flask import Flask, abort, redirect, render_template, request, send_file
+from flask import Flask, abort, redirect, render_template, request, send_file, url_for
 from waitress import serve
 
 from .db import (
@@ -18,6 +18,16 @@ from .db import (
     search_norms,
 )
 
+PAGE_SIZE = 50
+MAX_PAGE = 100_000
+
+
+def _page_number(value: str) -> int:
+    try:
+        return min(MAX_PAGE, max(1, int(value)))
+    except (TypeError, ValueError):
+        return 1
+
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -27,6 +37,7 @@ def create_app() -> Flask:
     def index():
         query = request.args.get("q", "").strip()
         relevance = request.args.get("relevance", "relevant").strip()
+        page = _page_number(request.args.get("page", "1"))
         filters = {
             "source": request.args.get("source", "").strip(),
             "document_type": request.args.get("document_type", "").strip(),
@@ -36,7 +47,31 @@ def create_app() -> Flask:
             "date_from": request.args.get("date_from", "").strip(),
             "date_to": request.args.get("date_to", "").strip(),
         }
-        rows = search_norms(query=query, relevance=relevance, **filters)
+        offset = (page - 1) * PAGE_SIZE
+        fetched = search_norms(
+            query=query,
+            relevance=relevance,
+            limit=PAGE_SIZE + 1,
+            offset=offset,
+            **filters,
+        )
+        has_next = len(fetched) > PAGE_SIZE
+        rows = fetched[:PAGE_SIZE]
+
+        base_args = {
+            "q": query,
+            "relevance": relevance,
+            **filters,
+        }
+        base_args = {key: value for key, value in base_args.items() if value}
+        pagination = {
+            "page": page,
+            "has_previous": page > 1,
+            "has_next": has_next,
+            "previous_url": url_for("index", **base_args, page=page - 1) if page > 1 else None,
+            "next_url": url_for("index", **base_args, page=page + 1) if has_next else None,
+        }
+
         return render_template(
             "index.html",
             rows=rows,
@@ -44,6 +79,7 @@ def create_app() -> Flask:
             relevance=relevance,
             filters=filters,
             options=list_norm_filter_options(),
+            pagination=pagination,
         )
 
     @app.get("/norm/<norm_id>/pdf")
