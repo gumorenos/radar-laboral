@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK = ROOT / "benchmarks" / "classifier_seed_v1.jsonl"
 OFFICIAL_BENCHMARK = ROOT / "benchmarks" / "classifier_official_v2.jsonl"
 PDF_BENCHMARK = ROOT / "benchmarks" / "classifier_official_pdf_v1.jsonl"
+TOPICS_BENCHMARK = ROOT / "benchmarks" / "classifier_official_topics_v1.jsonl"
 
 
 class ClassifierBenchmarkTests(unittest.TestCase):
@@ -42,6 +43,17 @@ class ClassifierBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["false_negatives"], [])
         self.assertEqual(metrics["labor_recall"], 1.0)
         self.assertGreaterEqual(metrics["strict_relevant_recall"], 0.8)
+
+    def test_priority_topic_controls_remain_visible_and_precise(self) -> None:
+        cases = load_cases(TOPICS_BENCHMARK)
+        metrics = evaluate_cases(cases)
+
+        self.assertGreaterEqual(len(cases), 9)
+        self.assertEqual(metrics["false_negatives"], [])
+        self.assertEqual(metrics["labor_recall"], 1.0)
+        self.assertGreaterEqual(metrics["strict_relevant_recall"], 0.95)
+        self.assertGreaterEqual(metrics["review_exact_recall"], 0.9)
+        self.assertGreaterEqual(metrics["exact_accuracy"], 0.9)
 
     def test_benchmark_tracks_reviews_as_visible_not_as_false_negatives(self) -> None:
         metrics = evaluate_cases(
