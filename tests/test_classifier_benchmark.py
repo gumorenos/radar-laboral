@@ -11,6 +11,7 @@ from radar_laboral.benchmark import evaluate_cases, load_cases
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK = ROOT / "benchmarks" / "classifier_seed_v1.jsonl"
 OFFICIAL_BENCHMARK = ROOT / "benchmarks" / "classifier_official_v2.jsonl"
+PDF_BENCHMARK = ROOT / "benchmarks" / "classifier_official_pdf_v1.jsonl"
 
 
 class ClassifierBenchmarkTests(unittest.TestCase):
@@ -32,6 +33,15 @@ class ClassifierBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["labor_recall"], 1.0)
         self.assertGreaterEqual(metrics["nonlabor_specificity"], 0.9)
         self.assertGreaterEqual(metrics["tracked_precision"], 0.9)
+
+    def test_pdf_text_controls_are_not_lost_by_generic_titles(self) -> None:
+        cases = load_cases(PDF_BENCHMARK)
+        metrics = evaluate_cases(cases)
+
+        self.assertGreaterEqual(len(cases), 5)
+        self.assertEqual(metrics["false_negatives"], [])
+        self.assertEqual(metrics["labor_recall"], 1.0)
+        self.assertGreaterEqual(metrics["strict_relevant_recall"], 0.8)
 
     def test_benchmark_tracks_reviews_as_visible_not_as_false_negatives(self) -> None:
         metrics = evaluate_cases(
