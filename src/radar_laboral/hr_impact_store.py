@@ -43,10 +43,7 @@ def init_hr_impact_store() -> None:
 
 
 def _fingerprint(record: Mapping[str, object]) -> str:
-    payload = {
-        field: record.get(field)
-        for field in FINGERPRINT_FIELDS
-    }
+    payload = {field: record.get(field) for field in FINGERPRINT_FIELDS}
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -153,7 +150,8 @@ def get_hr_impact(norm_id: str) -> dict[str, object] | None:
 def impacts_for_records(records: Iterable[Mapping[str, object]]) -> dict[str, dict[str, object]]:
     """Return impact data for visible rows, lazily refreshing only those rows."""
     result: dict[str, dict[str, object]] = {}
-    for record in records:
+    for raw_record in records:
+        record = dict(raw_record)
         norm_id = str(record.get("id") or "")
         if not norm_id:
             continue
