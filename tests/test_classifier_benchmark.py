@@ -8,7 +8,9 @@ from pathlib import Path
 from radar_laboral.benchmark import evaluate_cases, load_cases
 
 
-BENCHMARK = Path(__file__).resolve().parents[1] / "benchmarks" / "classifier_seed_v1.jsonl"
+ROOT = Path(__file__).resolve().parents[1]
+BENCHMARK = ROOT / "benchmarks" / "classifier_seed_v1.jsonl"
+OFFICIAL_BENCHMARK = ROOT / "benchmarks" / "classifier_official_v2.jsonl"
 
 
 class ClassifierBenchmarkTests(unittest.TestCase):
@@ -20,6 +22,16 @@ class ClassifierBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["false_negatives"], [])
         self.assertEqual(metrics["labor_recall"], 1.0)
         self.assertGreaterEqual(metrics["nonlabor_specificity"], 0.85)
+
+    def test_official_benchmark_protects_recall_and_hard_negatives(self) -> None:
+        cases = load_cases(OFFICIAL_BENCHMARK)
+        metrics = evaluate_cases(cases)
+
+        self.assertGreaterEqual(len(cases), 20)
+        self.assertEqual(metrics["false_negatives"], [])
+        self.assertEqual(metrics["labor_recall"], 1.0)
+        self.assertGreaterEqual(metrics["nonlabor_specificity"], 0.9)
+        self.assertGreaterEqual(metrics["tracked_precision"], 0.9)
 
     def test_benchmark_tracks_reviews_as_visible_not_as_false_negatives(self) -> None:
         metrics = evaluate_cases(
