@@ -34,13 +34,14 @@ POLICY_SIGNALS = (
     "observatorio",
 )
 
+# These signals are intentionally stronger than generic phrases such as
+# "establecen medidas". Impact triage must not infer a direct employer
+# obligation merely because an authority announces administrative measures.
 DIRECT_CHANGE_SIGNALS = (
     "modifica el reglamento",
     "modifican el reglamento",
     "aprueba el reglamento",
     "aprueban el reglamento",
-    "establece medidas",
-    "establecen medidas",
     "regula ",
     "regulan ",
     "prohibe ",
