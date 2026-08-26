@@ -123,13 +123,14 @@ def _row_to_dict(row) -> dict[str, object]:
     }
 
 
-def get_hr_impact(norm_id: str) -> dict[str, object] | None:
-    """Return cached impact, refreshing it when classifier inputs changed."""
-    init_hr_impact_store()
-    norm = get_norm(norm_id)
-    if norm is None:
+def _impact_for_record(record: Mapping[str, object]) -> dict[str, object] | None:
+    """Return cached impact for one already-loaded norm, refreshing only when stale."""
+    if str(record.get("labor_relevance") or "") == "not_labor":
         return None
-    record = dict(norm)
+
+    norm_id = str(record.get("id") or "").strip()
+    if not norm_id:
+        return None
     fingerprint = _fingerprint(record)
 
     with connect() as conn:
@@ -143,19 +144,27 @@ def get_hr_impact(norm_id: str) -> dict[str, object] | None:
         or int(row["impact_version"] or 0) < HR_IMPACT_VERSION
         or str(row["input_fingerprint"] or "") != fingerprint
     ):
-        return assess_and_store(record)
+        impact = assess_hr_impact(record)
+        return _persist(norm_id, fingerprint, impact)
     return _row_to_dict(row)
 
 
+def get_hr_impact(norm_id: str) -> dict[str, object] | None:
+    """Return cached impact, refreshing it when classifier inputs changed."""
+    init_hr_impact_store()
+    norm = get_norm(norm_id)
+    if norm is None:
+        return None
+    return _impact_for_record(dict(norm))
+
+
 def impacts_for_records(records: Iterable[Mapping[str, object]]) -> dict[str, dict[str, object]]:
-    """Return impact data for visible rows, lazily refreshing only those rows."""
+    """Return impacts for visible rows without re-reading each norm from SQLite."""
+    init_hr_impact_store()
     result: dict[str, dict[str, object]] = {}
     for raw_record in records:
         record = dict(raw_record)
-        norm_id = str(record.get("id") or "")
-        if not norm_id:
-            continue
-        impact = get_hr_impact(norm_id)
+        impact = _impact_for_record(record)
         if impact is not None:
-            result[norm_id] = impact
+            result[str(record["id"])] = impact
     return result
