@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
 
 from radar_laboral.hr_impact import HR_IMPACT_VERSION, assess_hr_impact
+
+
+IMPACT_BENCHMARK = (
+    Path(__file__).resolve().parents[1] / "benchmarks" / "hr_impact_official_v1.jsonl"
+)
 
 
 class HrImpactTests(unittest.TestCase):
@@ -132,6 +139,26 @@ class HrImpactTests(unittest.TestCase):
         self.assertEqual(result["hr_impact_level"], "medium")
         self.assertTrue(result["hr_impact_requires_review"])
         self.assertIn("no cambiar procesos", result["hr_action_recommended"].lower())
+
+    def test_official_impact_benchmark_matches_scope_and_level(self) -> None:
+        cases = [
+            json.loads(line)
+            for line in IMPACT_BENCHMARK.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertGreaterEqual(len(cases), 9)
+        mismatches: list[str] = []
+        for case in cases:
+            result = assess_hr_impact(case["record"])
+            if (
+                result["hr_impact_scope"] != case["expected_scope"]
+                or result["hr_impact_level"] != case["expected_level"]
+            ):
+                mismatches.append(
+                    f"{case['id']}: expected={case['expected_scope']}/{case['expected_level']} "
+                    f"actual={result['hr_impact_scope']}/{result['hr_impact_level']}"
+                )
+        self.assertEqual(mismatches, [])
 
 
 if __name__ == "__main__":
