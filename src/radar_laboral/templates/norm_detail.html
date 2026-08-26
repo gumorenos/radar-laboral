@@ -22,6 +22,13 @@
     .badge-review { background: #fef3c7; }
     .badge-not_labor { background: #f1f5f9; color: #64748b; }
     .badge-extraordinary { background: #e0e7ff; }
+    .impact-high { background: #fee2e2; color: #991b1b; }
+    .impact-medium { background: #fef3c7; color: #92400e; }
+    .impact-low { background: #e0f2fe; color: #075985; }
+    .impact-none { background: #f1f5f9; color: #64748b; }
+    .impact-scope { background: #eef2ff; color: #3730a3; margin-left: 6px; }
+    .notice { margin: 14px 0 0; padding: 12px 14px; border-radius: 9px; background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
+    .project-warning { margin: 14px 0 0; padding: 12px 14px; border-radius: 9px; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
     .muted { color: #666; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
     .button { display: inline-block; padding: 9px 12px; border: 1px solid #ccc; border-radius: 8px; text-decoration: none; background: white; }
@@ -61,6 +68,26 @@
     </dl>
     {% if norm.summary %}<h3>Sumilla / resumen</h3><p>{{ norm.summary }}</p>{% endif %}
     {% if norm.relevance_reason %}<h3>Motivo de clasificación</h3><p>{{ norm.relevance_reason }}</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Análisis operativo de RR.HH.</h2>
+    {% if hr_impact %}
+      <dl class="grid">
+        <div class="field"><dt>Impacto</dt><dd><span class="badge impact-{{ hr_impact.hr_impact_level }}">{{ {'high':'Alto','medium':'Medio','low':'Bajo','none':'Sin impacto'}.get(hr_impact.hr_impact_level, hr_impact.hr_impact_level) }}</span></dd></div>
+        <div class="field"><dt>Alcance</dt><dd><span class="badge impact-scope">{{ {'direct':'Directo','indirect':'Indirecto','potential':'Potencial','unclear':'Por confirmar','none':'Sin alcance'}.get(hr_impact.hr_impact_scope, hr_impact.hr_impact_scope) }}</span></dd></div>
+        <div class="field"><dt>Revisión</dt><dd>{% if hr_impact.hr_impact_requires_review %}<span class="badge badge-review">Requiere revisión</span>{% else %}No marcada por el motor{% endif %}</dd></div>
+        <div class="field"><dt>Versión del análisis</dt><dd>{{ hr_impact.hr_impact_version }}</dd></div>
+      </dl>
+      <h3>Razón</h3><p>{{ hr_impact.hr_impact_reason }}</p>
+      <h3>Acción recomendada</h3><p>{{ hr_impact.hr_action_recommended }}</p>
+      {% if hr_impact.hr_impact_scope == 'potential' %}<div class="project-warning"><strong>Potencial / proyecto:</strong> esta publicación indica un posible cambio futuro. No debe tratarse como una obligación vigente ni provocar cambios de proceso únicamente por su publicación.</div>{% endif %}
+      {% if hr_impact.hr_impact_evidence %}<details><summary>Evidencia usada por el análisis</summary><pre>{{ hr_impact.hr_impact_evidence | tojson(indent=2) }}</pre></details>{% endif %}
+      <p class="muted">Evaluado: {{ hr_impact.assessed_at or '—' }}</p>
+    {% else %}
+      <p class="muted">No se calcula impacto operativo de RR.HH. para documentos clasificados como no laborales.</p>
+    {% endif %}
+    <div class="notice"><strong>Advertencia:</strong> este es un análisis operativo automatizado y auditable. No sustituye la revisión del efecto jurídico, vigencia, obligatoriedad ni la consulta de la fuente oficial.</div>
   </section>
 
   <section class="card">

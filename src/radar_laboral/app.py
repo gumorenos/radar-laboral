@@ -30,6 +30,7 @@ from .db import (
     norm_stats,
     search_norms,
 )
+from .hr_impact_store import get_hr_impact, impacts_for_records, init_hr_impact_store
 from .relations import (
     list_related_case_law,
     list_related_norms,
@@ -115,6 +116,7 @@ def _valid_admin_token(candidate: str) -> bool:
 def create_app() -> Flask:
     app = Flask(__name__)
     init_db()
+    init_hr_impact_store()
 
     @app.get("/")
     def index():
@@ -144,6 +146,7 @@ def create_app() -> Flask:
         return render_template(
             "index.html",
             rows=rows,
+            impact_by_id=impacts_for_records(rows),
             query=query,
             relevance=relevance,
             filters=filters,
@@ -167,6 +170,7 @@ def create_app() -> Flask:
         return render_template(
             "norm_detail.html",
             norm=row,
+            hr_impact=get_hr_impact(norm_id),
             related_norms=list_related_norms(norm_id),
             related_case_law=list_related_case_law(norm_id),
             relation_labels=RELATION_LABELS,
