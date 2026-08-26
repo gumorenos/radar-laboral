@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from radar_laboral.db import search_norms, upsert_norm
+from radar_laboral.db import connect, get_norm, init_db, search_norms, upsert_norm
 from radar_laboral.hr_impact_store import (
     get_hr_impact,
     impacts_for_records,
@@ -32,6 +32,7 @@ class HrImpactStoreTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {"RADAR_DATA_DIR": self.tmp.name}, clear=False)
         self.env.start()
+        init_db()
         init_hr_impact_store()
 
     def tearDown(self) -> None:
@@ -69,13 +70,48 @@ class HrImpactStoreTests(unittest.TestCase):
         self.assertEqual(second["hr_impact_scope"], "direct")
         self.assertEqual(second["hr_impact_level"], "high")
 
-    def test_batch_helper_accepts_sqlite_rows_from_search(self) -> None:
+    def test_batch_helper_accepts_sqlite_rows_without_reloading_norms(self) -> None:
         upsert_norm(norm_record("impact:3", "Decreto Supremo que modifica el Reglamento de la Ley del Teletrabajo"))
         rows = search_norms(relevance="tracked", limit=10)
-        impacts = impacts_for_records(rows)
 
+        with patch("radar_laboral.hr_impact_store.get_norm") as get_norm_mock:
+            impacts = impacts_for_records(rows)
+
+        get_norm_mock.assert_not_called()
         self.assertIn("impact:3", impacts)
         self.assertEqual(impacts["impact:3"]["hr_impact_level"], "high")
+
+    def test_not_labor_rows_are_not_persisted_as_fake_impact(self) -> None:
+        upsert_norm(norm_record("impact:4", "Designan Asesor del Despacho Ministerial"))
+        row = get_norm("impact:4")
+        self.assertEqual(row["labor_relevance"], "not_labor")
+
+        impacts = impacts_for_records([row])
+
+        self.assertEqual(impacts, {})
+        self.assertIsNone(get_hr_impact("impact:4"))
+        with connect() as conn:
+            stored = conn.execute(
+                "SELECT 1 FROM norm_hr_impact WHERE norm_id = ?",
+                ("impact:4",),
+            ).fetchone()
+        self.assertIsNone(stored)
+
+    def test_store_initialization_preserves_existing_database(self) -> None:
+        upsert_norm(norm_record("impact:existing", "Decreto Supremo que regula el teletrabajo"))
+        before = dict(get_norm("impact:existing"))
+        with connect() as conn:
+            conn.execute("DROP TABLE norm_hr_impact")
+
+        init_hr_impact_store()
+
+        after = dict(get_norm("impact:existing"))
+        self.assertEqual(after, before)
+        with connect() as conn:
+            table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'norm_hr_impact'"
+            ).fetchone()
+        self.assertIsNotNone(table)
 
     def test_missing_norm_returns_none(self) -> None:
         self.assertIsNone(get_hr_impact("missing"))
