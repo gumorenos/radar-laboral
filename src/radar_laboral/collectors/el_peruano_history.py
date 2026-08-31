@@ -10,6 +10,7 @@ import requests
 from radar_laboral.collectors.el_peruano import cache_pdf, default_catalog_path, merge_catalog
 from radar_laboral.collectors.el_peruano_search import (
     TRACKED_RELEVANCE,
+    SearchCollectorError,
     fetch_day,
     local_today,
 )
@@ -23,6 +24,8 @@ from radar_laboral.db import (
 )
 
 SOURCE = "El Peruano histórico"
+DEFAULT_FETCH_ATTEMPTS = 4
+DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
 
 
 def _iter_days(start_date: date, end_date: date):
@@ -30,6 +33,39 @@ def _iter_days(start_date: date, end_date: date):
     while current <= end_date:
         yield current
         current += timedelta(days=1)
+
+
+def _fetch_day_with_retry(
+    session: requests.Session,
+    current_day: date,
+    *,
+    page_delay_seconds: float,
+    attempts: int = DEFAULT_FETCH_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+):
+    """Fetch one day, retrying only source/network failures.
+
+    A failed attempt never means an empty publication day. Coverage is written only
+    after a later successful fetch, or the final exception is propagated.
+    """
+    attempts = max(1, attempts)
+    retryable = (requests.RequestException, SearchCollectorError)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return fetch_day(
+                session,
+                current_day,
+                page_delay_seconds=max(0.0, page_delay_seconds),
+            )
+        except retryable:
+            if attempt >= attempts:
+                raise
+            delay = max(0.0, retry_backoff_seconds) * (2 ** (attempt - 1))
+            if delay > 0:
+                time.sleep(delay)
+
+    raise AssertionError("unreachable")
 
 
 def backfill(
@@ -69,10 +105,10 @@ def backfill(
             if processed_any_day and day_delay_seconds > 0:
                 time.sleep(day_delay_seconds)
 
-            raw_records = fetch_day(
+            raw_records = _fetch_day_with_retry(
                 session,
                 current_day,
-                page_delay_seconds=max(0.0, page_delay_seconds),
+                page_delay_seconds=page_delay_seconds,
             )
             day_records: list[dict[str, object]] = []
 
