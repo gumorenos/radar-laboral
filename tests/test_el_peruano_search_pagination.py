@@ -4,6 +4,7 @@ import unittest
 from datetime import date
 
 from radar_laboral.collectors.el_peruano_search import (
+    SearchCollectorError,
     fetch_day,
     fetch_publication_type,
     parse_search_html,
@@ -118,6 +119,100 @@ class ElPeruanoSearchPaginationTests(unittest.TestCase):
         self.assertEqual(len(records), 21)
         self.assertEqual(session.requests, [("NL", 0), ("NL", 20)])
         self.assertTrue(all(item["edition"] == "regular" for item in records))
+
+    def test_source_overcount_is_accepted_only_after_explicit_exhaustion(self) -> None:
+        first_page = (
+            "<div>3 dispositivos encontrados</div>"
+            + result_html(
+                "2443018-1",
+                "RESOLUCIÓN MINISTERIAL N° D000244-2025-MIDIS",
+                "Aprueban el Cuadro para Asignación de Personal Provisional",
+                issuer="DESARROLLO E INCLUSIÓN SOCIAL",
+                publication_type="EX",
+            )
+            + result_html(
+                "2443019-1",
+                "RESOLUCIÓN MINISTERIAL N° D000245-2025-MIDIS",
+                "Modifican la Sección Segunda del Reglamento de Organización y Funciones",
+                issuer="DESARROLLO E INCLUSIÓN SOCIAL",
+                publication_type="EX",
+            )
+        )
+        empty_page = (
+            "<div>3 dispositivos encontrados</div>"
+            "<div>No hay resultados para mostrar.</div>"
+        )
+        session = _Session({("EX", 0): first_page, ("EX", 20): empty_page})
+
+        with self.assertLogs(level="WARNING") as logs:
+            records = fetch_publication_type(
+                session,
+                date(2025, 9, 27),
+                "EX",
+                "extraordinary",
+                page_delay_seconds=0,
+            )
+
+        self.assertEqual(
+            [item["id"] for item in records],
+            ["elperuano:2443018-1", "elperuano:2443019-1"],
+        )
+        self.assertEqual(session.requests, [("EX", 0), ("EX", 20)])
+        self.assertIn("informó 3 dispositivos EX", "\n".join(logs.output))
+        self.assertIn("solo enlazó 2 OP únicos", "\n".join(logs.output))
+
+    def test_visible_device_that_parser_cannot_normalize_fails(self) -> None:
+        malformed_visible_device = """
+        <div>1 dispositivos encontrados</div>
+        <div class="result">
+          <a href="/dispositivo/EX/2443999-1">RESOLUCIÓN MINISTERIAL N° 999-2025-TR</a>
+          <span>2443999-1</span>
+        </div>
+        """
+        session = _Session({("EX", 0): malformed_visible_device})
+
+        with self.assertRaisesRegex(SearchCollectorError, "no normalizó exactamente"):
+            fetch_publication_type(
+                session,
+                date(2025, 9, 27),
+                "EX",
+                "extraordinary",
+                page_delay_seconds=0,
+            )
+
+        self.assertEqual(session.requests, [("EX", 0)])
+
+    def test_ambiguous_blank_page_does_not_excuse_total_mismatch(self) -> None:
+        first_page = (
+            "<div>3 dispositivos encontrados</div>"
+            + result_html(
+                "2443018-1",
+                "RESOLUCIÓN MINISTERIAL N° D000244-2025-MIDIS",
+                "Aprueban CAP Provisional",
+                publication_type="EX",
+            )
+            + result_html(
+                "2443019-1",
+                "RESOLUCIÓN MINISTERIAL N° D000245-2025-MIDIS",
+                "Modifican Reglamento de Organización y Funciones",
+                publication_type="EX",
+            )
+        )
+        session = _Session(
+            {
+                ("EX", 0): first_page,
+                ("EX", 20): "<div>3 dispositivos encontrados</div><div>Cargando…</div>",
+            }
+        )
+
+        with self.assertRaises(SearchCollectorError):
+            fetch_publication_type(
+                session,
+                date(2025, 9, 27),
+                "EX",
+                "extraordinary",
+                page_delay_seconds=0,
+            )
 
     def test_fetch_day_combines_regular_and_extraordinary(self) -> None:
         regular = result_html(

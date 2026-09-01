@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import re
 import time
@@ -118,6 +119,18 @@ def _heading_and_summary(anchors: list[Tag]) -> tuple[str | None, str | None]:
     return heading, summary
 
 
+def _device_ops_in_html(html: str) -> set[str]:
+    """Return the unique official device identifiers visibly linked in one result page."""
+    soup = BeautifulSoup(html, "html.parser")
+    ops: set[str] = set()
+    for anchor in soup.find_all("a", href=True):
+        absolute = urljoin(SEARCH_URL, str(anchor.get("href", "")).strip())
+        device_match = SEARCH_DEVICE_RE.search(urlparse(absolute).path)
+        if device_match:
+            ops.add(device_match.group("op"))
+    return ops
+
+
 def parse_search_html(
     html: str,
     *,
@@ -211,6 +224,7 @@ def fetch_publication_type(
     offset = 0
     expected_total: int | None = None
     records: dict[str, dict[str, str | None]] = {}
+    explicitly_exhausted = False
 
     for page_index in range(100):
         response = session.get(
@@ -221,14 +235,33 @@ def fetch_publication_type(
         response.raise_for_status()
         page_records, total, explicit_empty = parse_search_html(response.text, edition=edition)
 
+        raw_ops = _device_ops_in_html(response.text)
+        normalized_ops = {
+            str(record["id"]).removeprefix("elperuano:")
+            for record in page_records
+        }
+        if raw_ops != normalized_ops:
+            missing = sorted(raw_ops - normalized_ops)
+            unexpected = sorted(normalized_ops - raw_ops)
+            raise SearchCollectorError(
+                f"El parser no normalizó exactamente los dispositivos visibles para "
+                f"{publication_type} {day.isoformat()} (start={offset}); "
+                f"faltantes={missing}, inesperados={unexpected}."
+            )
+
         if expected_total is None and total is not None:
             expected_total = total
 
         for record in page_records:
             records[str(record["id"])] = record
 
-        if explicit_empty and page_index == 0 and not page_records and total is None:
-            return []
+        if explicit_empty and not page_records:
+            if page_index == 0 and total is None:
+                return []
+            if expected_total == 0:
+                return []
+            explicitly_exhausted = True
+            break
         if expected_total == 0:
             return []
         if expected_total is not None and len(records) >= expected_total:
@@ -252,10 +285,21 @@ def fetch_publication_type(
             f"El Peruano devolvió dispositivos {publication_type} para {day.isoformat()} sin informar el total."
         )
     if len(records) != expected_total:
-        raise SearchCollectorError(
-            f"El Peruano informó {expected_total} dispositivos {publication_type} para {day.isoformat()} "
-            f"pero se normalizaron {len(records)}."
-        )
+        if explicitly_exhausted:
+            logging.warning(
+                "El Peruano informó %s dispositivos %s para %s, pero solo enlazó %s OP únicos; "
+                "la página siguiente devolvió vacío explícito. Se conservan los OP visibles y "
+                "completamente normalizados.",
+                expected_total,
+                publication_type,
+                day.isoformat(),
+                len(records),
+            )
+        else:
+            raise SearchCollectorError(
+                f"El Peruano informó {expected_total} dispositivos {publication_type} para {day.isoformat()} "
+                f"pero se normalizaron {len(records)}."
+            )
 
     return sorted(records.values(), key=lambda item: item["id"] or "")
 
