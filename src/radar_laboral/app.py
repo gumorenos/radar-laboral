@@ -5,6 +5,7 @@ import hmac
 import os
 import threading
 import webbrowser
+from collections.abc import Mapping
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -88,13 +89,81 @@ def _env_positive_int(name: str, default: int) -> int:
         return default
 
 
-def _local_today() -> date:
+def _local_zone() -> ZoneInfo:
     timezone_name = os.getenv("RADAR_TIMEZONE", DEFAULT_TIMEZONE)
     try:
-        zone = ZoneInfo(timezone_name)
+        return ZoneInfo(timezone_name)
     except Exception:
-        zone = ZoneInfo(DEFAULT_TIMEZONE)
-    return datetime.now(zone).date()
+        return ZoneInfo(DEFAULT_TIMEZONE)
+
+
+def _local_today() -> date:
+    return datetime.now(_local_zone()).date()
+
+
+def _format_date_display(value: object) -> object:
+    if value is None or value == "":
+        return value
+    if isinstance(value, datetime):
+        parsed = value.date()
+    elif isinstance(value, date):
+        parsed = value
+    else:
+        text = str(value).strip()
+        try:
+            parsed = date.fromisoformat(text[:10])
+        except ValueError:
+            return value
+    return parsed.strftime("%d/%m/%Y")
+
+
+def _format_datetime_display(value: object) -> object:
+    if value is None or value == "":
+        return value
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(_local_zone())
+    return parsed.strftime("%d/%m/%Y %H:%M")
+
+
+def _display_mapping(
+    raw: Mapping[str, object] | None,
+    *,
+    date_fields: tuple[str, ...] = (),
+    datetime_fields: tuple[str, ...] = (),
+) -> dict[str, object] | None:
+    if raw is None:
+        return None
+    item = dict(raw)
+    for field in date_fields:
+        if field in item:
+            item[field] = _format_date_display(item[field])
+    for field in datetime_fields:
+        if field in item:
+            item[field] = _format_datetime_display(item[field])
+    return item
+
+
+def _display_coverage(raw: Mapping[str, object]) -> dict[str, object]:
+    coverage = dict(raw)
+    for field in ("window_start", "window_end", "first_missing", "last_missing"):
+        coverage[field] = _format_date_display(coverage.get(field))
+    coverage["missing_ranges"] = [
+        {
+            **dict(gap),
+            "start": _format_date_display(dict(gap).get("start")),
+            "end": _format_date_display(dict(gap).get("end")),
+        }
+        for gap in raw.get("missing_ranges", [])
+    ]
+    return coverage
 
 
 def _coverage(today: date) -> dict[str, object]:
@@ -141,19 +210,25 @@ def create_app() -> Flask:
             **filters,
         )
         has_next = len(fetched) > PAGE_SIZE
-        rows = fetched[:PAGE_SIZE]
+        raw_rows = fetched[:PAGE_SIZE]
+        rows = [
+            _display_mapping(row, date_fields=("publication_date",))
+            for row in raw_rows
+        ]
         today = _local_today()
         return render_template(
             "index.html",
             rows=rows,
-            impact_by_id=impacts_for_records(rows),
+            impact_by_id=impacts_for_records(raw_rows),
             query=query,
             relevance=relevance,
             filters=filters,
             options=list_norm_filter_options(),
             stats=norm_stats(),
-            date_bounds=norm_date_bounds(),
-            coverage=_coverage(today),
+            date_bounds=_display_mapping(
+                norm_date_bounds(), date_fields=("earliest", "latest")
+            ),
+            coverage=_display_coverage(_coverage(today)),
             pagination=_pagination(
                 "index",
                 page,
@@ -167,10 +242,15 @@ def create_app() -> Flask:
         row = get_norm(norm_id)
         if row is None:
             abort(404)
+        impact = get_hr_impact(norm_id)
         return render_template(
             "norm_detail.html",
-            norm=row,
-            hr_impact=get_hr_impact(norm_id),
+            norm=_display_mapping(
+                row,
+                date_fields=("publication_date", "effective_date"),
+                datetime_fields=("captured_at", "updated_at"),
+            ),
+            hr_impact=_display_mapping(impact, datetime_fields=("assessed_at",)),
             related_norms=list_related_norms(norm_id),
             related_case_law=list_related_case_law(norm_id),
             relation_labels=RELATION_LABELS,
@@ -208,7 +288,13 @@ def create_app() -> Flask:
             **filters,
         )
         has_next = len(fetched) > PAGE_SIZE
-        rows = fetched[:PAGE_SIZE]
+        rows = [
+            _display_mapping(
+                row,
+                date_fields=("decision_date", "publication_date"),
+            )
+            for row in fetched[:PAGE_SIZE]
+        ]
         return render_template(
             "case_law_index.html",
             rows=rows,
@@ -230,7 +316,11 @@ def create_app() -> Flask:
             abort(404)
         return render_template(
             "case_law_detail.html",
-            case=row,
+            case=_display_mapping(
+                row,
+                date_fields=("decision_date", "publication_date"),
+                datetime_fields=("captured_at", "updated_at"),
+            ),
             related_norms=list_related_norms_for_case_law(case_id),
             relation_labels=RELATION_LABELS,
         )
@@ -255,10 +345,23 @@ def create_app() -> Flask:
         return render_template(
             "status.html",
             stats=norm_stats(),
-            date_bounds=norm_date_bounds(),
-            coverage=coverage,
-            last_sync=dict(last_sync) if last_sync else None,
-            sync_requests=[dict(row) for row in list_sync_requests(20)],
+            date_bounds=_display_mapping(
+                norm_date_bounds(), date_fields=("earliest", "latest")
+            ),
+            coverage=_display_coverage(coverage),
+            last_sync=_display_mapping(
+                dict(last_sync) if last_sync else None,
+                date_fields=("latest_publication_date",),
+                datetime_fields=("started_at", "finished_at"),
+            ),
+            sync_requests=[
+                _display_mapping(
+                    dict(row),
+                    date_fields=("start_date", "end_date"),
+                    datetime_fields=("requested_at", "started_at", "finished_at"),
+                )
+                for row in list_sync_requests(20)
+            ],
             admin_enabled=bool(_admin_token()),
             today=today.isoformat(),
             suggested_start=coverage["first_missing"] or "",
