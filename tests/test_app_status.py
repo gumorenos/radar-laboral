@@ -246,6 +246,16 @@ class AppStatusTests(unittest.TestCase):
         self.assertIn(b"Traer desde", response.data)
         self.assertIn(b"RADAR_ADMIN_TOKEN", response.data)
 
+    def test_status_page_contains_live_progress_polling_without_page_reload(self) -> None:
+        response = self.client.get("/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Progreso en vivo", response.data)
+        self.assertIn(b"data-live-progress", response.data)
+        self.assertIn(b"fetch('/api/status'", response.data)
+        self.assertIn(b"cache: 'no-store'", response.data)
+        self.assertIn(b"setTimeout(poll", response.data)
+        self.assertNotIn(b"location.reload", response.data)
+
 
 if __name__ == "__main__":
     unittest.main()
