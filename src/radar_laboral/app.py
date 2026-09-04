@@ -166,6 +166,17 @@ def _display_coverage(raw: Mapping[str, object]) -> dict[str, object]:
     return coverage
 
 
+def _display_sync_request(raw: Mapping[str, object]) -> dict[str, object]:
+    item = _display_mapping(
+        raw,
+        date_fields=("start_date", "end_date"),
+        datetime_fields=("requested_at", "started_at", "finished_at"),
+    ) or {}
+    item["start_date_iso"] = str(raw["start_date"])
+    item["end_date_iso"] = str(raw["end_date"])
+    return item
+
+
 def _coverage(today: date) -> dict[str, object]:
     return coverage_summary(
         today,
@@ -354,17 +365,10 @@ def create_app() -> Flask:
                 date_fields=("latest_publication_date",),
                 datetime_fields=("started_at", "finished_at"),
             ),
-            sync_requests=[
-                _display_mapping(
-                    dict(row),
-                    date_fields=("start_date", "end_date"),
-                    datetime_fields=("requested_at", "started_at", "finished_at"),
-                )
-                for row in list_sync_requests(20)
-            ],
+            sync_requests=[_display_sync_request(dict(row)) for row in list_sync_requests(20)],
             admin_enabled=bool(_admin_token()),
             today=today.isoformat(),
-            suggested_start=coverage["first_missing"] or "",
+            suggested_start=coverage["first_missing"] or today.isoformat(),
             max_backfill_days=_env_positive_int(
                 "RADAR_MAX_BACKFILL_DAYS", DEFAULT_MAX_BACKFILL_DAYS
             ),
