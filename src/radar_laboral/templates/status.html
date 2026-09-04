@@ -37,7 +37,11 @@
     .notice-error { background: #fee2e2; color: #991b1b; }
     .notice-warn { background: #fef3c7; color: #92400e; }
     .progress { height: 12px; border-radius: 999px; background: #e5e7eb; overflow: hidden; margin: 12px 0 18px; }
-    .progress > div { height: 100%; background: #166534; min-width: 0; }
+    .progress > div { height: 100%; background: #166534; min-width: 0; transition: width .25s ease; }
+    .live-panel { border-color: #bfdbfe; background: #eff6ff; }
+    .live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; }
+    .live-value { font-size: 18px; font-weight: 700; margin-top: 3px; overflow-wrap: anywhere; }
+    .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; margin-right: 7px; }
     .gap-list { margin: 10px 0 0; padding-left: 20px; }
     .table-wrap { overflow-x: auto; }
     table { border-collapse: collapse; width: 100%; min-width: 760px; }
@@ -67,14 +71,14 @@
   <section class="panel">
     <h2>Cobertura diaria verificada</h2>
     <p class="sub">Esta métrica comprueba días realmente consultados y validados contra El Peruano; no se deduce solo de la primera y última norma almacenada. La ventana excluye hoy porque todavía pueden aparecer publicaciones durante el día.</p>
-    <div><strong>{{ coverage.verified_days }} / {{ coverage.target_days }} días</strong> · {{ coverage.coverage_percent }}%</div>
-    <div class="progress" aria-label="Cobertura {{ coverage.coverage_percent }}%"><div style="width: {{ coverage.coverage_percent }}%"></div></div>
+    <div><strong><span id="coverage-verified">{{ coverage.verified_days }}</span> / <span id="coverage-target">{{ coverage.target_days }}</span> días</strong> · <span id="coverage-percent">{{ coverage.coverage_percent }}</span>%</div>
+    <div class="progress" id="coverage-progress" aria-label="Cobertura {{ coverage.coverage_percent }}%"><div style="width: {{ coverage.coverage_percent }}%"></div></div>
     <dl>
       <dt>Ventana evaluada</dt><dd>{{ coverage.window_start }} → {{ coverage.window_end }}</dd>
-      <dt>Días verificados</dt><dd>{{ coverage.verified_days }}</dd>
-      <dt>Días faltantes</dt><dd>{{ coverage.missing_days }}</dd>
-      <dt>Primera fecha faltante</dt><dd>{{ coverage.first_missing or '—' }}</dd>
-      <dt>Última fecha faltante</dt><dd>{{ coverage.last_missing or '—' }}</dd>
+      <dt>Días verificados</dt><dd id="coverage-verified-detail">{{ coverage.verified_days }}</dd>
+      <dt>Días faltantes</dt><dd id="coverage-missing">{{ coverage.missing_days }}</dd>
+      <dt>Primera fecha faltante</dt><dd id="coverage-first-missing">{{ coverage.first_missing or '—' }}</dd>
+      <dt>Última fecha faltante</dt><dd id="coverage-last-missing">{{ coverage.last_missing or '—' }}</dd>
       <dt>Hoy consultado</dt><dd>{{ 'Sí' if coverage.today_checked else 'No' }}{% if coverage.today_check %} · {{ coverage.today_check.record_count }} documentos vistos; no cuenta aún como día histórico cerrado{% endif %}</dd>
     </dl>
 
@@ -91,6 +95,22 @@
       {% if coverage.missing_ranges|length > 8 %}<p class="sub">Hay {{ coverage.missing_ranges|length - 8 }} rangos adicionales.</p>{% endif %}
     {% endif %}
     <p class="sub">Un día con cero publicaciones oficiales sí cuenta como verificado si El Peruano devuelve un estado vacío explícito y válido.</p>
+  </section>
+
+  <section class="panel live-panel" id="live-progress" data-live-progress>
+    <div class="top">
+      <div>
+        <h2 style="margin-bottom: 4px;">Progreso en vivo</h2>
+        <div class="sub">Se actualiza automáticamente mientras exista una carga pendiente o en ejecución.</div>
+      </div>
+      <div id="live-connection" class="sub">Esperando estado…</div>
+    </div>
+    <div class="live-grid" style="margin-top: 14px;">
+      <div><div class="label">Solicitud</div><div class="live-value" id="live-request">—</div></div>
+      <div><div class="label">Estado</div><div class="live-value" id="live-status">—</div></div>
+      <div><div class="label">Cobertura</div><div class="live-value" id="live-coverage">{{ coverage.verified_days }} / {{ coverage.target_days }} · {{ coverage.coverage_percent }}%</div></div>
+      <div><div class="label">Siguiente hueco</div><div class="live-value" id="live-next">{{ coverage.first_missing or '—' }}</div></div>
+    </div>
   </section>
 
   <section class="panel">
@@ -173,5 +193,79 @@
     {% endif %}
   </section>
 </main>
+<script>
+(() => {
+  const pollMs = 4000;
+  const idlePollMs = 15000;
+  const $ = (id) => document.getElementById(id);
+  let timer = null;
+
+  const formatDate = (value) => {
+    if (!value || typeof value !== 'string') return '—';
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+  };
+
+  const setCoverage = (coverage) => {
+    if (!coverage) return;
+    $('coverage-verified').textContent = coverage.verified_days;
+    $('coverage-target').textContent = coverage.target_days;
+    $('coverage-percent').textContent = coverage.coverage_percent;
+    $('coverage-verified-detail').textContent = coverage.verified_days;
+    $('coverage-missing').textContent = coverage.missing_days;
+    $('coverage-first-missing').textContent = formatDate(coverage.first_missing);
+    $('coverage-last-missing').textContent = formatDate(coverage.last_missing);
+    $('live-coverage').textContent = `${coverage.verified_days} / ${coverage.target_days} · ${coverage.coverage_percent}%`;
+    $('live-next').textContent = formatDate(coverage.first_missing);
+    const bar = $('coverage-progress').firstElementChild;
+    bar.style.width = `${coverage.coverage_percent}%`;
+    $('coverage-progress').setAttribute('aria-label', `Cobertura ${coverage.coverage_percent}%`);
+  };
+
+  const pickActive = (requests) => {
+    if (!Array.isArray(requests)) return null;
+    return requests.find((item) => item.status === 'running') ||
+           requests.find((item) => item.status === 'pending') || null;
+  };
+
+  const render = (payload) => {
+    setCoverage(payload.coverage);
+    const active = pickActive(payload.sync_requests);
+    if (active) {
+      $('live-request').textContent = `#${active.id} · ${formatDate(active.start_date)} → ${formatDate(active.end_date)}`;
+      $('live-status').className = `live-value ${active.status}`;
+      $('live-status').innerHTML = `<span class="pulse"></span>${active.status}`;
+      $('live-connection').textContent = 'Actualización automática activa';
+      return pollMs;
+    }
+    const latest = Array.isArray(payload.sync_requests) ? payload.sync_requests[0] : null;
+    $('live-request').textContent = latest ? `#${latest.id}` : '—';
+    $('live-status').className = `live-value ${latest ? latest.status : ''}`;
+    $('live-status').textContent = latest ? latest.status : 'Sin cargas activas';
+    $('live-connection').textContent = 'Sin carga activa';
+    return idlePollMs;
+  };
+
+  const poll = async () => {
+    let nextDelay = idlePollMs;
+    try {
+      const response = await fetch('/api/status', {
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      nextDelay = render(await response.json());
+    } catch (error) {
+      $('live-connection').textContent = 'No se pudo actualizar; reintentando…';
+      nextDelay = idlePollMs;
+    } finally {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(poll, nextDelay);
+    }
+  };
+
+  poll();
+})();
+</script>
 </body>
 </html>
