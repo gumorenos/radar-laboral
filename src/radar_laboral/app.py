@@ -182,8 +182,19 @@ def _valid_admin_token(candidate: str) -> bool:
     return bool(configured) and hmac.compare_digest(configured, candidate)
 
 
+def _find_sync_request(request_id: int):
+    # The UI only exposes the 20 most recent rows. Looking through the latest 100
+    # keeps this endpoint bounded while still allowing every visible failed row to retry.
+    return next(
+        (row for row in list_sync_requests(100) if int(row["id"]) == int(request_id)),
+        None,
+    )
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.jinja_env.filters["display_date"] = _format_date_display
+    app.jinja_env.filters["display_datetime"] = _format_datetime_display
     init_db()
     init_hr_impact_store()
 
@@ -370,6 +381,7 @@ def create_app() -> Flask:
             ),
             queued=request.args.get("queued", "").strip(),
             created=request.args.get("created", "").strip(),
+            retried=request.args.get("retried", "").strip(),
             sync_error=request.args.get("sync_error", "").strip(),
         )
 
@@ -418,6 +430,38 @@ def create_app() -> Flask:
                 "status_page",
                 queued=request_id,
                 created="1" if created else "0",
+            )
+        )
+
+    @app.post("/admin/backfill/retry/<int:request_id>")
+    def retry_backfill(request_id: int):
+        if not _admin_token():
+            abort(503, description="La carga histórica web no está habilitada")
+        if not _valid_admin_token(request.form.get("admin_token", "")):
+            abort(403)
+
+        original = _find_sync_request(request_id)
+        if original is None:
+            abort(404)
+        if str(original["status"]) != "failed":
+            return redirect(
+                url_for(
+                    "status_page",
+                    sync_error=f"Solo se pueden repetir solicitudes fallidas; #{request_id} está {original['status']}",
+                )
+            )
+
+        new_request_id, created = enqueue_backfill_request(
+            str(original["start_date"]),
+            str(original["end_date"]),
+            download_pdfs=bool(original["download_pdfs"]),
+        )
+        return redirect(
+            url_for(
+                "status_page",
+                queued=new_request_id,
+                created="1" if created else "0",
+                retried=request_id,
             )
         )
 
