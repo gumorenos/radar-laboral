@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from radar_laboral.app import create_app
-from radar_laboral.db import list_sync_requests
+from radar_laboral.db import finish_sync_request, list_sync_requests
 
 
 class BackfillAdminTests(unittest.TestCase):
@@ -29,6 +29,18 @@ class BackfillAdminTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.env.stop()
         self.tmp.cleanup()
+
+    def _queue(self, *, download_pdfs: bool = False) -> int:
+        payload = {
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-31",
+            "admin_token": "test-secret",
+        }
+        if download_pdfs:
+            payload["download_pdfs"] = "1"
+        response = self.client.post("/admin/backfill", data=payload)
+        self.assertEqual(response.status_code, 302)
+        return int(list_sync_requests()[0]["id"])
 
     def test_status_renders_enabled_selector_without_exposing_token(self) -> None:
         response = self.client.get("/status")
@@ -107,6 +119,64 @@ class BackfillAdminTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("sync_error=", response.location)
         self.assertEqual(list_sync_requests(), [])
+
+    def test_failed_request_has_retry_button_and_visible_peru_dates(self) -> None:
+        request_id = self._queue()
+        finish_sync_request(request_id, status="failed", error="temporary source failure")
+
+        response = self.client.get("/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Repetir", response.data)
+        self.assertIn(f'data-retry-request="{request_id}"'.encode(), response.data)
+        self.assertIn(b"01/07/2026", response.data)
+        self.assertIn(b"31/07/2026", response.data)
+        self.assertNotIn(b"test-secret", response.data)
+
+    def test_retry_failed_request_creates_same_new_request(self) -> None:
+        request_id = self._queue(download_pdfs=True)
+        finish_sync_request(request_id, status="failed", error="temporary source failure")
+
+        response = self.client.post(
+            f"/admin/backfill/retry/{request_id}",
+            data={"admin_token": "test-secret"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"retried={request_id}", response.location)
+        rows = list_sync_requests()
+        self.assertEqual(len(rows), 2)
+        newest, original = rows
+        self.assertEqual(original["id"], request_id)
+        self.assertEqual(original["status"], "failed")
+        self.assertEqual(newest["status"], "pending")
+        self.assertEqual(newest["start_date"], original["start_date"])
+        self.assertEqual(newest["end_date"], original["end_date"])
+        self.assertEqual(newest["download_pdfs"], original["download_pdfs"])
+
+    def test_retry_requires_admin_token(self) -> None:
+        request_id = self._queue()
+        finish_sync_request(request_id, status="failed", error="temporary source failure")
+
+        response = self.client.post(
+            f"/admin/backfill/retry/{request_id}",
+            data={"admin_token": "wrong"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(len(list_sync_requests()), 1)
+
+    def test_non_failed_request_cannot_be_retried(self) -> None:
+        request_id = self._queue()
+
+        response = self.client.post(
+            f"/admin/backfill/retry/{request_id}",
+            data={"admin_token": "test-secret"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("sync_error=", response.location)
+        self.assertEqual(len(list_sync_requests()), 1)
 
 
 class BackfillAdminDisabledTests(unittest.TestCase):
