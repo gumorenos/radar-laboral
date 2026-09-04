@@ -29,6 +29,7 @@
     .field label { font-size: 13px; color: #555; font-weight: 600; }
     input, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; box-sizing: border-box; width: 100%; }
     button { cursor: pointer; background: #222; color: white; }
+    .retry-button { width: auto; min-width: 86px; padding: 7px 10px; font-size: 12px; white-space: nowrap; }
     input:disabled, button:disabled { cursor: not-allowed; opacity: .55; }
     .check { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
     .check input { width: auto; }
@@ -40,7 +41,7 @@
     .progress > div { height: 100%; background: #166534; min-width: 0; }
     .gap-list { margin: 10px 0 0; padding-left: 20px; }
     .table-wrap { overflow-x: auto; }
-    table { border-collapse: collapse; width: 100%; min-width: 760px; }
+    table { border-collapse: collapse; width: 100%; min-width: 860px; }
     th, td { padding: 9px 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; font-size: 13px; }
     th { color: #555; background: #fafafa; }
   </style>
@@ -105,7 +106,7 @@
       <div class="notice notice-warn">La carga desde la web está deshabilitada hasta configurar <code>RADAR_ADMIN_TOKEN</code>. Los selectores se muestran para dejar clara la funcionalidad, pero no se puede encolar trabajo desde el dominio público sin esa protección.</div>
     {% endif %}
 
-    <form class="sync-form" method="post" action="/admin/backfill">
+    <form id="backfill-form" class="sync-form" method="post" action="/admin/backfill">
       <div class="field">
         <label for="start_date">Traer desde</label>
         <input id="start_date" type="date" name="start_date" value="{{ suggested_start }}" max="{{ today }}" required {% if not admin_enabled %}disabled{% endif %}>
@@ -119,7 +120,7 @@
         <input id="admin_token" type="password" name="admin_token" autocomplete="current-password" required {% if not admin_enabled %}disabled{% endif %}>
       </div>
       <div class="field">
-        <label class="check"><input type="checkbox" name="download_pdfs" value="1" {% if not admin_enabled %}disabled{% endif %}> Descargar también PDFs laborales</label>
+        <label class="check"><input id="download_pdfs" type="checkbox" name="download_pdfs" value="1" {% if not admin_enabled %}disabled{% endif %}> Descargar también PDFs laborales</label>
         <button type="submit" {% if not admin_enabled %}disabled{% endif %}>Encolar carga histórica</button>
       </div>
     </form>
@@ -129,9 +130,10 @@
   <section class="panel">
     <h2>Solicitudes recientes</h2>
     {% if sync_requests %}
+      {% if admin_enabled %}<p class="sub">Para repetir una solicitud fallida, ingresa la clave administrativa arriba y pulsa <strong>Repetir</strong>. Se reutilizan exactamente el rango y la opción de PDFs de esa solicitud.</p>{% endif %}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>#</th><th>Rango</th><th>PDFs</th><th>Estado</th><th>Solicitada</th><th>Inicio / fin</th><th>Error</th></tr></thead>
+          <thead><tr><th>#</th><th>Rango</th><th>PDFs</th><th>Estado</th><th>Solicitada</th><th>Inicio / fin</th><th>Error</th><th>Acción</th></tr></thead>
           <tbody>
           {% for item in sync_requests %}
             <tr>
@@ -142,6 +144,18 @@
               <td>{{ item.requested_at }}</td>
               <td>{{ item.started_at or '—' }}<br>{{ item.finished_at or '—' }}</td>
               <td>{% if item.error %}<code>{{ item.error }}</code>{% else %}—{% endif %}</td>
+              <td>
+                {% if item.status == 'failed' %}
+                  <button
+                    class="retry-button"
+                    type="button"
+                    data-start-date="{{ item.start_date_iso }}"
+                    data-end-date="{{ item.end_date_iso }}"
+                    data-download-pdfs="{{ 1 if item.download_pdfs else 0 }}"
+                    {% if not admin_enabled %}disabled{% endif %}
+                  >Repetir</button>
+                {% else %}—{% endif %}
+              </td>
             </tr>
           {% endfor %}
           </tbody>
@@ -173,5 +187,23 @@
     {% endif %}
   </section>
 </main>
+<script>
+  (() => {
+    const form = document.querySelector('#backfill-form');
+    const startDate = document.querySelector('#start_date');
+    const endDate = document.querySelector('#end_date');
+    const downloadPdfs = document.querySelector('#download_pdfs');
+    if (!form || !startDate || !endDate || !downloadPdfs) return;
+
+    document.querySelectorAll('.retry-button').forEach((button) => {
+      button.addEventListener('click', () => {
+        startDate.value = button.dataset.startDate || '';
+        endDate.value = button.dataset.endDate || '';
+        downloadPdfs.checked = button.dataset.downloadPdfs === '1';
+        form.requestSubmit();
+      });
+    });
+  })();
+</script>
 </body>
 </html>
