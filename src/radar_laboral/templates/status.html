@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="es-PE">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -29,6 +29,7 @@
     .field label { font-size: 13px; color: #555; font-weight: 600; }
     input, button { font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: white; box-sizing: border-box; width: 100%; }
     button { cursor: pointer; background: #222; color: white; }
+    .retry-button { width: auto; padding: 6px 9px; font-size: 12px; white-space: nowrap; }
     input:disabled, button:disabled { cursor: not-allowed; opacity: .55; }
     .check { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
     .check input { width: auto; }
@@ -44,7 +45,7 @@
     .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; margin-right: 7px; }
     .gap-list { margin: 10px 0 0; padding-left: 20px; }
     .table-wrap { overflow-x: auto; }
-    table { border-collapse: collapse; width: 100%; min-width: 760px; }
+    table { border-collapse: collapse; width: 100%; min-width: 840px; }
     th, td { padding: 9px 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; font-size: 13px; }
     th { color: #555; background: #fafafa; }
   </style>
@@ -64,8 +65,8 @@
     <div class="card"><div class="label">Relevantes</div><div class="value">{{ stats.relevant }}</div></div>
     <div class="card"><div class="label">Por revisar</div><div class="value">{{ stats.review }}</div></div>
     <div class="card"><div class="label">PDFs locales</div><div class="value">{{ stats.pdf_cached }}</div></div>
-    <div class="card"><div class="label">Primera norma almacenada</div><div class="value value-date">{{ date_bounds.earliest or '—' }}</div></div>
-    <div class="card"><div class="label">Última norma almacenada</div><div class="value value-date">{{ date_bounds.latest or '—' }}</div></div>
+    <div class="card"><div class="label">Primera norma almacenada</div><div class="value value-date">{{ date_bounds.earliest|display_date or '—' }}</div></div>
+    <div class="card"><div class="label">Última norma almacenada</div><div class="value value-date">{{ date_bounds.latest|display_date or '—' }}</div></div>
   </div>
 
   <section class="panel">
@@ -74,22 +75,22 @@
     <div><strong><span id="coverage-verified">{{ coverage.verified_days }}</span> / <span id="coverage-target">{{ coverage.target_days }}</span> días</strong> · <span id="coverage-percent">{{ coverage.coverage_percent }}</span>%</div>
     <div class="progress" id="coverage-progress" aria-label="Cobertura {{ coverage.coverage_percent }}%"><div style="width: {{ coverage.coverage_percent }}%"></div></div>
     <dl>
-      <dt>Ventana evaluada</dt><dd>{{ coverage.window_start }} → {{ coverage.window_end }}</dd>
+      <dt>Ventana evaluada</dt><dd>{{ coverage.window_start|display_date }} → {{ coverage.window_end|display_date }}</dd>
       <dt>Días verificados</dt><dd id="coverage-verified-detail">{{ coverage.verified_days }}</dd>
       <dt>Días faltantes</dt><dd id="coverage-missing">{{ coverage.missing_days }}</dd>
-      <dt>Primera fecha faltante</dt><dd id="coverage-first-missing">{{ coverage.first_missing or '—' }}</dd>
-      <dt>Última fecha faltante</dt><dd id="coverage-last-missing">{{ coverage.last_missing or '—' }}</dd>
+      <dt>Primera fecha faltante</dt><dd id="coverage-first-missing">{{ coverage.first_missing|display_date or '—' }}</dd>
+      <dt>Última fecha faltante</dt><dd id="coverage-last-missing">{{ coverage.last_missing|display_date or '—' }}</dd>
       <dt>Hoy consultado</dt><dd>{{ 'Sí' if coverage.today_checked else 'No' }}{% if coverage.today_check %} · {{ coverage.today_check.record_count }} documentos vistos; no cuenta aún como día histórico cerrado{% endif %}</dd>
     </dl>
 
     {% if coverage.missing_days == 0 %}
       <div class="notice notice-ok">La ventana histórica configurada está completamente verificada.</div>
     {% else %}
-      <div class="notice notice-warn">Hay huecos reales de cobertura. El selector de abajo propone empezar por <strong>{{ coverage.first_missing }}</strong>.</div>
+      <div class="notice notice-warn">Hay huecos reales de cobertura. El selector de abajo propone empezar por <strong>{{ coverage.first_missing|display_date }}</strong>.</div>
       <p><strong>Primeros huecos detectados:</strong></p>
       <ul class="gap-list">
         {% for gap in coverage.missing_ranges[:8] %}
-          <li>{{ gap.start }}{% if gap.end != gap.start %} → {{ gap.end }}{% endif %} · {{ gap.days }} día{% if gap.days != 1 %}s{% endif %}</li>
+          <li>{{ gap.start|display_date }}{% if gap.end != gap.start %} → {{ gap.end|display_date }}{% endif %} · {{ gap.days }} día{% if gap.days != 1 %}s{% endif %}</li>
         {% endfor %}
       </ul>
       {% if coverage.missing_ranges|length > 8 %}<p class="sub">Hay {{ coverage.missing_ranges|length - 8 }} rangos adicionales.</p>{% endif %}
@@ -109,7 +110,7 @@
       <div><div class="label">Solicitud</div><div class="live-value" id="live-request">—</div></div>
       <div><div class="label">Estado</div><div class="live-value" id="live-status">—</div></div>
       <div><div class="label">Cobertura</div><div class="live-value" id="live-coverage">{{ coverage.verified_days }} / {{ coverage.target_days }} · {{ coverage.coverage_percent }}%</div></div>
-      <div><div class="label">Siguiente hueco</div><div class="live-value" id="live-next">{{ coverage.first_missing or '—' }}</div></div>
+      <div><div class="label">Siguiente hueco</div><div class="live-value" id="live-next">{{ coverage.first_missing|display_date or '—' }}</div></div>
     </div>
   </section>
 
@@ -118,7 +119,7 @@
     <p class="sub">Selecciona desde qué fecha quieres completar el inventario. El trabajo se encola y lo procesa un worker separado; la web continúa respondiendo mientras corre. Repetir un rango es seguro porque el almacenamiento usa upsert por documento.</p>
 
     {% if queued %}
-      {% if created == '1' %}<div class="notice notice-ok">Solicitud #{{ queued }} encolada correctamente.</div>{% else %}<div class="notice notice-warn">La solicitud #{{ queued }} ya estaba pendiente o en ejecución; no se duplicó.</div>{% endif %}
+      {% if created == '1' %}<div class="notice notice-ok">{% if retried %}Solicitud #{{ retried }} repetida como {% endif %}Solicitud #{{ queued }} encolada correctamente.</div>{% else %}<div class="notice notice-warn">La solicitud #{{ queued }} ya estaba pendiente o en ejecución; no se duplicó.</div>{% endif %}
     {% endif %}
     {% if sync_error %}<div class="notice notice-error">{{ sync_error }}</div>{% endif %}
     {% if not admin_enabled %}
@@ -151,22 +152,31 @@
     {% if sync_requests %}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>#</th><th>Rango</th><th>PDFs</th><th>Estado</th><th>Solicitada</th><th>Inicio / fin</th><th>Error</th></tr></thead>
+          <thead><tr><th>#</th><th>Rango</th><th>PDFs</th><th>Estado</th><th>Solicitada</th><th>Inicio / fin</th><th>Error</th><th>Acción</th></tr></thead>
           <tbody>
           {% for item in sync_requests %}
             <tr>
               <td>{{ item.id }}</td>
-              <td>{{ item.start_date }} → {{ item.end_date }}</td>
+              <td>{{ item.start_date|display_date }} → {{ item.end_date|display_date }}</td>
               <td>{{ 'Sí' if item.download_pdfs else 'No' }}</td>
               <td class="{{ item.status }}">{{ item.status }}</td>
-              <td>{{ item.requested_at }}</td>
-              <td>{{ item.started_at or '—' }}<br>{{ item.finished_at or '—' }}</td>
+              <td>{{ item.requested_at|display_datetime }}</td>
+              <td>{{ item.started_at|display_datetime or '—' }}<br>{{ item.finished_at|display_datetime or '—' }}</td>
               <td>{% if item.error %}<code>{{ item.error }}</code>{% else %}—{% endif %}</td>
+              <td>
+                {% if item.status == 'failed' and admin_enabled %}
+                  <button type="button" class="retry-button" data-retry-request="{{ item.id }}">Repetir</button>
+                  <form id="retry-form-{{ item.id }}" method="post" action="/admin/backfill/retry/{{ item.id }}" hidden>
+                    <input type="hidden" name="admin_token" value="">
+                  </form>
+                {% else %}—{% endif %}
+              </td>
             </tr>
           {% endfor %}
           </tbody>
         </table>
       </div>
+      {% if admin_enabled %}<p class="sub">“Repetir” crea una nueva solicitud con el mismo rango y la misma opción de PDFs. La clave administrativa se solicita al momento de confirmar y no se guarda en la página.</p>{% endif %}
     {% else %}
       <p class="sub">No hay solicitudes de carga histórica todavía.</p>
     {% endif %}
@@ -179,13 +189,13 @@
         <dt>Fuente</dt><dd>{{ last_sync.source }}</dd>
         <dt>Estado</dt>
         <dd class="{% if last_sync.status == 'success' %}ok{% elif last_sync.status == 'failed' %}failed{% endif %}">{{ last_sync.status }}</dd>
-        <dt>Inicio</dt><dd>{{ last_sync.started_at }}</dd>
-        <dt>Fin</dt><dd>{{ last_sync.finished_at or 'En curso' }}</dd>
+        <dt>Inicio</dt><dd>{{ last_sync.started_at|display_datetime }}</dd>
+        <dt>Fin</dt><dd>{{ last_sync.finished_at|display_datetime or 'En curso' }}</dd>
         <dt>Documentos encontrados</dt><dd>{{ last_sync.records_seen }}</dd>
         <dt>Relevantes</dt><dd>{{ last_sync.relevant_count }}</dd>
         <dt>Por revisar</dt><dd>{{ last_sync.review_count }}</dd>
         <dt>PDFs disponibles</dt><dd>{{ last_sync.pdf_count }}</dd>
-        <dt>Publicación más reciente</dt><dd>{{ last_sync.latest_publication_date or '—' }}</dd>
+        <dt>Publicación más reciente</dt><dd>{{ last_sync.latest_publication_date|display_date or '—' }}</dd>
         {% if last_sync.error %}<dt>Error</dt><dd><code>{{ last_sync.error }}</code></dd>{% endif %}
       </dl>
     {% else %}
@@ -263,6 +273,17 @@
       timer = window.setTimeout(poll, nextDelay);
     }
   };
+
+  document.querySelectorAll('[data-retry-request]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const requestId = button.dataset.retryRequest;
+      const token = window.prompt(`Clave administrativa para repetir la solicitud #${requestId}:`);
+      if (!token) return;
+      const form = document.getElementById(`retry-form-${requestId}`);
+      form.querySelector('input[name="admin_token"]').value = token;
+      form.submit();
+    });
+  });
 
   poll();
 })();
