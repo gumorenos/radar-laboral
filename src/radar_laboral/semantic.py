@@ -4,6 +4,10 @@ import math
 from collections.abc import Sequence
 
 DEFAULT_E5_MODEL = "intfloat/multilingual-e5-small"
+DEFAULT_LOCAL_MODELS = (
+    "intfloat/multilingual-e5-small",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+)
 
 POSITIVE_ANCHORS = (
     "derecho laboral peruano: contratación de trabajadores, contratos de trabajo y periodo de prueba",
@@ -26,24 +30,24 @@ NEGATIVE_ANCHORS = (
 )
 
 
-class E5SentenceTransformerScorer:
-    """Similarity-based semantic signal using a multilingual E5 model.
+class SentenceTransformerAnchorScorer:
+    """Similarity-based semantic signal using a sentence-transformers model.
 
-    The model and anchor embeddings are loaded once per scorer instance. The
-    returned value is an evidence score, not a calibrated probability.
-
-    This backend is optional: install the `semantic` project extra before
-    constructing it. Keeping it outside the default image protects the small
-    Raspberry deployment until benchmark results justify enabling it.
+    The model is optional and is intended for experiments/offline evaluation.
+    It is not part of the default Raspberry image. The returned score is an
+    evidence signal in [0, 1], not a calibrated legal probability.
     """
 
     def __init__(
         self,
-        model_name: str = DEFAULT_E5_MODEL,
+        model_name: str,
         *,
         positive_anchors: Sequence[str] = POSITIVE_ANCHORS,
         negative_anchors: Sequence[str] = NEGATIVE_ANCHORS,
         device: str = "cpu",
+        query_prefix: str = "",
+        passage_prefix: str = "",
+        margin_scale: float = 8.0,
     ) -> None:
         try:
             from sentence_transformers import SentenceTransformer
@@ -54,9 +58,12 @@ class E5SentenceTransformerScorer:
 
         self.name = model_name
         self.model = SentenceTransformer(model_name, device=device)
+        self.query_prefix = query_prefix
+        self.passage_prefix = passage_prefix
+        self.margin_scale = float(margin_scale)
         self._positive = tuple(positive_anchors)
         self._negative = tuple(negative_anchors)
-        anchor_texts = [f"passage: {text}" for text in (*self._positive, *self._negative)]
+        anchor_texts = [f"{self.passage_prefix}{text}" for text in (*self._positive, *self._negative)]
         embeddings = self.model.encode(
             anchor_texts,
             normalize_embeddings=True,
@@ -74,18 +81,41 @@ class E5SentenceTransformerScorer:
     def score(self, text: str) -> float:
         if not text.strip():
             return 0.5
-
         query_embedding = self.model.encode(
-            [f"query: {text}"],
+            [f"{self.query_prefix}{text}"],
             normalize_embeddings=True,
             convert_to_numpy=True,
             show_progress_bar=False,
         )[0]
         positive_similarity = float((self._positive_embeddings @ query_embedding).max())
         negative_similarity = float((self._negative_embeddings @ query_embedding).max())
-
-        # E5 cosine similarities are not probabilities. We transform only the
-        # positive-vs-negative margin into a stable 0..1 evidence signal. The
-        # multiplier is intentionally easy to calibrate later with the corpus.
         margin = positive_similarity - negative_similarity
-        return self._sigmoid(8.0 * margin)
+        return self._sigmoid(self.margin_scale * margin)
+
+
+class E5SentenceTransformerScorer(SentenceTransformerAnchorScorer):
+    """Multilingual E5 scorer preserving the query/passage convention."""
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_E5_MODEL,
+        *,
+        positive_anchors: Sequence[str] = POSITIVE_ANCHORS,
+        negative_anchors: Sequence[str] = NEGATIVE_ANCHORS,
+        device: str = "cpu",
+    ) -> None:
+        super().__init__(
+            model_name,
+            positive_anchors=positive_anchors,
+            negative_anchors=negative_anchors,
+            device=device,
+            query_prefix="query: ",
+            passage_prefix="passage: ",
+        )
+
+
+def local_scorer(model_name: str, *, device: str = "cpu") -> SentenceTransformerAnchorScorer:
+    """Build a model-aware scorer for offline experiments."""
+    if "e5" in model_name.lower():
+        return E5SentenceTransformerScorer(model_name=model_name, device=device)
+    return SentenceTransformerAnchorScorer(model_name=model_name, device=device)
