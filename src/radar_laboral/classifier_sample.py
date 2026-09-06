@@ -40,7 +40,18 @@ def stratified_sample(per_class: int, *, seed: int = 20260905) -> list[dict[str,
     return selected
 
 
-def write_label_sheet(path: Path, rows: list[dict[str, object]]) -> None:
+def write_label_sheet(
+    path: Path,
+    rows: list[dict[str, object]],
+    *,
+    include_model_output: bool = False,
+) -> None:
+    """Write an annotation sheet.
+
+    The default is deliberately blind: annotators do not see the current model
+    prediction, scores or reason before assigning the human label. This reduces
+    anchoring bias when the resulting labels become the gold benchmark.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "id",
@@ -51,41 +62,51 @@ def write_label_sheet(path: Path, rows: list[dict[str, object]]) -> None:
         "title",
         "summary",
         "issuer",
-        "current_prediction",
-        "current_reason",
-        "classification_score",
-        "rule_score",
-        "classification_method",
         "official_url",
         "classification_text_excerpt",
         "human_label",
         "human_notes",
     ]
+    if include_model_output:
+        fieldnames.extend(
+            [
+                "current_prediction",
+                "current_reason",
+                "classification_score",
+                "rule_score",
+                "classification_method",
+            ]
+        )
+
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow(
-                {
-                    "id": row.get("id"),
-                    "publication_date": row.get("publication_date"),
-                    "source": row.get("source"),
-                    "document_type": row.get("document_type"),
-                    "number": row.get("number"),
-                    "title": row.get("title"),
-                    "summary": row.get("summary"),
-                    "issuer": row.get("issuer"),
-                    "current_prediction": row.get("labor_relevance"),
-                    "current_reason": row.get("relevance_reason"),
-                    "classification_score": row.get("classification_score"),
-                    "rule_score": row.get("rule_score"),
-                    "classification_method": row.get("classification_method"),
-                    "official_url": row.get("official_url"),
-                    "classification_text_excerpt": row.get("classification_text_excerpt"),
-                    "human_label": "",
-                    "human_notes": "",
-                }
-            )
+            output = {
+                "id": row.get("id"),
+                "publication_date": row.get("publication_date"),
+                "source": row.get("source"),
+                "document_type": row.get("document_type"),
+                "number": row.get("number"),
+                "title": row.get("title"),
+                "summary": row.get("summary"),
+                "issuer": row.get("issuer"),
+                "official_url": row.get("official_url"),
+                "classification_text_excerpt": row.get("classification_text_excerpt"),
+                "human_label": "",
+                "human_notes": "",
+            }
+            if include_model_output:
+                output.update(
+                    {
+                        "current_prediction": row.get("labor_relevance"),
+                        "current_reason": row.get("relevance_reason"),
+                        "classification_score": row.get("classification_score"),
+                        "rule_score": row.get("rule_score"),
+                        "classification_method": row.get("classification_method"),
+                    }
+                )
+            writer.writerow(output)
 
 
 def main() -> None:
@@ -95,10 +116,20 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--per-class", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20260905)
+    parser.add_argument(
+        "--include-model-output",
+        action="store_true",
+        help="Incluye predicción y scores actuales; por defecto el etiquetado es ciego",
+    )
     args = parser.parse_args()
     rows = stratified_sample(max(1, args.per_class), seed=args.seed)
-    write_label_sheet(args.output, rows)
-    print(f"Exportados {len(rows)} registros a {args.output}")
+    write_label_sheet(
+        args.output,
+        rows,
+        include_model_output=args.include_model_output,
+    )
+    mode = "con predicción actual" if args.include_model_output else "ciego"
+    print(f"Exportados {len(rows)} registros a {args.output} (modo {mode})")
 
 
 if __name__ == "__main__":
