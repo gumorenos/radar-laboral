@@ -33,8 +33,7 @@ radar-laboral-classifier-sample = "radar_laboral.classifier_sample:main"
 radar-laboral-classifier-gold = "radar_laboral.classifier_gold:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"
-}
+package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.packages.find]
