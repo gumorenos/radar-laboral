@@ -48,6 +48,15 @@ def load_labeled_rows(path: Path, *, allow_incomplete: bool = False) -> list[dic
 
 def to_benchmark_case(row: dict[str, str]) -> dict[str, object]:
     record = {field: row.get(field, "") for field in RECORD_FIELDS if row.get(field, "")}
+
+    evidence_text = row.get("evidence_text", "").strip()
+    if evidence_text:
+        # Enriched blind sheets use an explicit evidence field instead of exposing
+        # the classifier's stored excerpt column. The benchmark classifier expects
+        # that legal text in classification_text_excerpt, so map it here only after
+        # the human label has been assigned.
+        record["classification_text_excerpt"] = evidence_text
+
     case: dict[str, object] = {
         "id": row["id"],
         "expected_relevance": row["human_label"],
@@ -56,6 +65,15 @@ def to_benchmark_case(row: dict[str, str]) -> dict[str, object]:
     notes = row.get("human_notes", "")
     if notes:
         case["human_notes"] = notes
+    evidence_source = row.get("evidence_source", "")
+    if evidence_source:
+        case["evidence_source"] = evidence_source
+    evidence_chars = row.get("evidence_chars", "")
+    if evidence_chars:
+        try:
+            case["evidence_chars"] = int(evidence_chars)
+        except ValueError:
+            case["evidence_chars"] = evidence_chars
     return case
 
 
