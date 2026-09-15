@@ -5,9 +5,28 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from radar_laboral.classifier_gold import load_labeled_rows, write_benchmark
-from radar_laboral.classifier_sample import write_label_sheet
+from radar_laboral.classifier_sample import build_evidence, write_label_sheet
+
+
+class _FakeResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeSession:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.requested: list[str] = []
+
+    def get(self, url: str, *, timeout: float):
+        self.requested.append(url)
+        return _FakeResponse(self.text)
 
 
 class ClassifierGoldWorkflowTests(unittest.TestCase):
@@ -24,6 +43,7 @@ class ClassifierGoldWorkflowTests(unittest.TestCase):
                 "issuer": "Ministerio de Trabajo y Promoción del Empleo",
                 "official_url": "https://example.test/1",
                 "classification_text_excerpt": "Texto legal relevante",
+                "pdf_path": "pdfs/test.pdf",
                 "labor_relevance": "relevant",
                 "relevance_reason": "materia laboral específica",
                 "classification_score": 0.91,
@@ -43,6 +63,27 @@ class ClassifierGoldWorkflowTests(unittest.TestCase):
             self.assertNotIn("current_prediction", rows[0])
             self.assertNotIn("classification_score", rows[0])
 
+    def test_enriched_label_sheet_stays_blind(self) -> None:
+        rows = self.sample_rows()
+        rows[0].update(
+            {
+                "evidence_source": "cached_pdf",
+                "evidence_chars": 123,
+                "evidence_text": "Texto oficial independiente del resultado del modelo",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labels-enriched.csv"
+            write_label_sheet(path, rows, enriched=True)
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                row = next(csv.DictReader(handle))
+            self.assertEqual(row["evidence_source"], "cached_pdf")
+            self.assertEqual(row["evidence_chars"], "123")
+            self.assertNotIn("classification_text_excerpt", row)
+            self.assertNotIn("current_prediction", row)
+            self.assertNotIn("current_reason", row)
+            self.assertNotIn("classification_method", row)
+
     def test_label_sheet_can_include_model_output_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "labels.csv"
@@ -51,6 +92,46 @@ class ClassifierGoldWorkflowTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             self.assertEqual(rows[0]["current_prediction"], "relevant")
             self.assertEqual(rows[0]["classification_method"], "rules_v4")
+
+    def test_evidence_prefers_summary(self) -> None:
+        row = self.sample_rows()[0]
+        source, text = build_evidence(row, session=_FakeSession("<html></html>"))
+        self.assertEqual(source, "summary")
+        self.assertIn("Resumen", text)
+
+    def test_evidence_uses_cached_pdf_before_network(self) -> None:
+        row = self.sample_rows()[0]
+        row["summary"] = None
+        session = _FakeSession("<main>Página oficial</main>")
+        with patch(
+            "radar_laboral.classifier_sample.extract_pdf_excerpt",
+            return_value="Texto extraído del PDF oficial cacheado",
+        ):
+            source, text = build_evidence(row, session=session)
+        self.assertEqual(source, "cached_pdf")
+        self.assertIn("PDF oficial", text)
+        self.assertEqual(session.requested, [])
+
+    def test_evidence_uses_official_page_when_local_text_is_missing(self) -> None:
+        row = self.sample_rows()[0]
+        row["summary"] = None
+        row["pdf_path"] = None
+        session = _FakeSession(
+            "<html><main><h1>Norma</h1><p>Considerando que regula relaciones laborales.</p>"
+            "<p>Artículo 1. Establécese una obligación.</p></main></html>"
+        )
+        source, text = build_evidence(row, session=session)
+        self.assertEqual(source, "official_page")
+        self.assertIn("relaciones laborales", text)
+        self.assertEqual(session.requested, ["https://example.test/1"])
+
+    def test_evidence_falls_back_to_title_only(self) -> None:
+        row = self.sample_rows()[0]
+        row["summary"] = None
+        row["pdf_path"] = None
+        source, text = build_evidence(row, session=None, fetch_official=False)
+        self.assertEqual(source, "title_only")
+        self.assertEqual(text, "Regula una materia laboral")
 
     def test_unlabeled_rows_fail_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -83,6 +164,38 @@ class ClassifierGoldWorkflowTests(unittest.TestCase):
             self.assertEqual(case["expected_relevance"], "review")
             self.assertEqual(case["record"]["title"], "Regula una materia laboral")
             self.assertEqual(case["human_notes"], "Requiere revisión jurídica")
+
+    def test_enriched_csv_maps_evidence_to_benchmark_excerpt(self) -> None:
+        rows = self.sample_rows()
+        rows[0].update(
+            {
+                "evidence_source": "official_page",
+                "evidence_chars": 37,
+                "evidence_text": "Texto oficial usado para la decisión humana",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "labels-enriched.csv"
+            jsonl_path = Path(tmp) / "gold.jsonl"
+            write_label_sheet(csv_path, rows, enriched=True)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                exported = list(csv.DictReader(handle))
+                fieldnames = list(exported[0].keys())
+            exported[0]["human_label"] = "relevant"
+            with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(exported)
+
+            labeled = load_labeled_rows(csv_path)
+            write_benchmark(jsonl_path, labeled)
+            case = json.loads(jsonl_path.read_text(encoding="utf-8").strip())
+            self.assertEqual(
+                case["record"]["classification_text_excerpt"],
+                "Texto oficial usado para la decisión humana",
+            )
+            self.assertEqual(case["evidence_source"], "official_page")
+            self.assertEqual(case["evidence_chars"], 37)
 
     def test_invalid_human_label_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
