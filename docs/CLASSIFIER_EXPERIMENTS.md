@@ -4,15 +4,54 @@ Radar Laboral mantiene `rules_v4` como comportamiento productivo por defecto. Lo
 
 ## 1. Crear una muestra humana del corpus
 
-Después de completar el histórico, exporta una muestra estratificada:
+Después de completar el histórico, exporta una muestra estratificada ciega:
 
 ```bash
 radar-laboral-classifier-sample /data/classifier-labels.csv --per-class 100
 ```
 
-El CSV incluye la predicción actual, score, motivo, URL oficial y columnas vacías `human_label` y `human_notes`. Las etiquetas humanas válidas son `relevant`, `review` y `not_labor`.
+Por defecto el CSV **no** incluye predicción, score, motivo ni método actuales. Solo `--include-model-output` los añade de forma explícita; esa opción no debe utilizarse para construir el benchmark gold porque puede introducir sesgo de anclaje. Las etiquetas humanas válidas son `relevant`, `review` y `not_labor`.
 
-No debe usarse la predicción de `rules_v4` como etiqueta gold. La etiqueta humana debe decidirse revisando título/sumilla y, cuando sea necesario, la fuente oficial o el texto legal.
+### Muestra ciega enriquecida
+
+Si título y metadatos no bastan para etiquetar, genera evidencia oficial adicional sin revelar la salida de `rules_v4`:
+
+```bash
+radar-laboral-classifier-sample \
+  /data/classifier-labels-blind-enriched.csv \
+  --per-class 100 \
+  --enrich
+```
+
+La prioridad de evidencia es:
+
+1. `summary` almacenado, cuando existe;
+2. texto extraído del PDF oficial ya cacheado;
+3. texto recuperable desde la página oficial;
+4. título como fallback.
+
+El CSV enriquecido añade `evidence_source`, `evidence_chars` y `evidence_text`. En modo ciego no muestra `classification_text_excerpt`, predicción, score, reason ni método del clasificador.
+
+Para enriquecer **exactamente los mismos IDs** de una muestra previa, sin volver a sortear el corpus:
+
+```bash
+radar-laboral-classifier-sample \
+  /data/classifier-labels-blind-enriched.csv \
+  --from-csv /data/classifier-labels-blind.csv \
+  --enrich
+```
+
+`--no-official-fetch` limita el enriquecimiento a información local. `--evidence-max-chars` controla el máximo por fila y `--official-delay` permite espaciar consultas a la fuente oficial.
+
+No debe usarse la predicción de `rules_v4` como etiqueta gold. La etiqueta humana debe decidirse revisando la evidencia oficial disponible. Al convertir un CSV enriquecido, `radar-laboral-classifier-gold` pasa `evidence_text` al campo de texto legal que utiliza el benchmark, pero solo después de que exista la etiqueta humana.
+
+Ejemplo de conversión:
+
+```bash
+radar-laboral-classifier-gold \
+  /data/classifier-labels-blind-enriched.csv \
+  benchmarks/classifier_corpus_gold_v1.jsonl
+```
 
 ## 2. Comparar modelos locales
 
