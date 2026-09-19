@@ -44,6 +44,18 @@ radar-laboral-classifier-sample \
 
 `--no-official-fetch` limita el enriquecimiento a información local. `--evidence-max-chars` controla el máximo por fila y `--official-delay` permite espaciar consultas a la fuente oficial.
 
+Si ya existe un CSV enriquecido y solo se quiere reintentar los casos que quedaron en `title_only`, puede reutilizarse la evidencia útil anterior para evitar repetir consultas:
+
+```bash
+radar-laboral-classifier-sample \
+  /data/classifier-labels-blind-enriched-v2.csv \
+  --from-csv /data/classifier-labels-blind-enriched.csv \
+  --enrich \
+  --reuse-evidence
+```
+
+Con `--reuse-evidence`, las filas con evidencia previa distinta de `title_only` se conservan; los fallbacks débiles se vuelven a intentar con el resolvedor de PDF remoto y la página oficial.
+
 No debe usarse la predicción de `rules_v4` como etiqueta gold. La etiqueta humana debe decidirse revisando la evidencia oficial disponible. Al convertir un CSV enriquecido, `radar-laboral-classifier-gold` pasa `evidence_text` al campo de texto legal que utiliza el benchmark, pero solo después de que exista la etiqueta humana.
 
 Ejemplo de conversión:
