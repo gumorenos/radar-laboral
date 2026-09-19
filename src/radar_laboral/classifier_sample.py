@@ -399,9 +399,23 @@ def write_sampling_manifest(path: Path, rows: list[dict[str, object]]) -> None:
     changes.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    with connect() as conn:
+        population_rows = conn.execute(
+            """
+            SELECT labor_relevance, COUNT(*) AS n
+            FROM norms
+            WHERE labor_relevance IN ('relevant', 'review', 'not_labor')
+            GROUP BY labor_relevance
+            """
+        ).fetchall()
+    population_counts = {
+        str(row["labor_relevance"]): int(row["n"]) for row in population_rows
+    }
+
     fieldnames = [
         "id",
         "sampling_stratum",
+        "stratum_population_count",
         "classification_version",
         "classification_score",
         "rule_score",
@@ -415,6 +429,9 @@ def write_sampling_manifest(path: Path, rows: list[dict[str, object]]) -> None:
                 {
                     "id": row.get("id"),
                     "sampling_stratum": row.get("labor_relevance"),
+                    "stratum_population_count": population_counts.get(
+                        str(row.get("labor_relevance") or ""), 0
+                    ),
                     "classification_version": row.get("classification_version"),
                     "classification_score": row.get("classification_score"),
                     "rule_score": row.get("rule_score"),
