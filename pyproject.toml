@@ -32,6 +32,7 @@ radar-laboral-classifier-experiment = "radar_laboral.classifier_experiment:main"
 radar-laboral-classifier-sample = "radar_laboral.classifier_sample:main"
 radar-laboral-classifier-gold = "radar_laboral.classifier_gold:main"
 radar-laboral-classifier-review = "radar_laboral.classifier_review:main"
+radar-laboral-classifier-audit = "radar_laboral.classifier_audit:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
