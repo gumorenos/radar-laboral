@@ -56,6 +56,20 @@ radar-laboral-classifier-sample \
 
 Con `--reuse-evidence`, las filas con evidencia previa distinta de `title_only` se conservan; los fallbacks débiles se vuelven a intentar con el resolvedor de PDF remoto y la página oficial.
 
+
+Para preservar el estrato de muestreo original sin contaminar al anotador, puede generarse un sidecar privado:
+
+```bash
+radar-laboral-classifier-sample \
+  /data/classifier-labels-blind-enriched-v2.csv \
+  --from-csv /data/classifier-labels-blind-enriched.csv \
+  --enrich \
+  --reuse-evidence \
+  --manifest /data/classifier-sampling-manifest-private.csv
+```
+
+El manifest contiene el estrato y estado del clasificador usados para seleccionar/auditar la muestra. **No debe compartirse con quien asigna las etiquetas humanas.** Sirve para reproducibilidad y para análisis posteriores de una muestra estratificada que no representa directamente la prevalencia real del corpus.
+
 No debe usarse la predicción de `rules_v4` como etiqueta gold. La etiqueta humana debe decidirse revisando la evidencia oficial disponible. Al convertir un CSV enriquecido, `radar-laboral-classifier-gold` pasa `evidence_text` al campo de texto legal que utiliza el benchmark, pero solo después de que exista la etiqueta humana.
 
 ### Interfaz local de etiquetado
