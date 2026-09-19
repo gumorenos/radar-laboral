@@ -13,6 +13,7 @@ from radar_laboral.classifier_sample import (
     enrich_rows,
     evidence_from_csv,
     write_label_sheet,
+    write_sampling_manifest,
 )
 
 
@@ -258,6 +259,26 @@ class ClassifierGoldWorkflowTests(unittest.TestCase):
         build.assert_not_called()
         self.assertEqual(enriched[0]["evidence_source"], "official_page")
         self.assertEqual(enriched[0]["evidence_text"], "Evidencia previa")
+
+    def test_sampling_manifest_is_separate_from_blind_sheet(self) -> None:
+        rows = self.sample_rows()
+        rows[0]["classification_version"] = 4
+        with tempfile.TemporaryDirectory() as tmp:
+            blind = Path(tmp) / "blind.csv"
+            manifest = Path(tmp) / "manifest.csv"
+            write_label_sheet(blind, rows, enriched=True)
+            write_sampling_manifest(manifest, rows)
+
+            with blind.open("r", encoding="utf-8-sig", newline="") as handle:
+                blind_row = next(csv.DictReader(handle))
+            with manifest.open("r", encoding="utf-8-sig", newline="") as handle:
+                manifest_row = next(csv.DictReader(handle))
+
+            self.assertNotIn("sampling_stratum", blind_row)
+            self.assertNotIn("classification_score", blind_row)
+            self.assertEqual(manifest_row["sampling_stratum"], "relevant")
+            self.assertEqual(manifest_row["classification_version"], "4")
+            self.assertEqual(manifest_row["classification_method"], "rules_v4")
 
     def test_invalid_human_label_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
