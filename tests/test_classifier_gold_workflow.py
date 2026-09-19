@@ -12,8 +12,19 @@ from radar_laboral.classifier_sample import build_evidence, write_label_sheet
 
 
 class _FakeResponse:
-    def __init__(self, text: str) -> None:
+    def __init__(
+        self,
+        text: str = "",
+        *,
+        content: bytes | None = None,
+        url: str = "",
+        content_type: str = "text/html",
+    ) -> None:
         self.text = text
+        self.content = content if content is not None else text.encode("utf-8")
+        self.url = url
+        self.headers = {"content-type": content_type}
+        self.encoding = "utf-8"
 
     def raise_for_status(self) -> None:
         return None
@@ -24,9 +35,9 @@ class _FakeSession:
         self.text = text
         self.requested: list[str] = []
 
-    def get(self, url: str, *, timeout: float):
+    def get(self, url: str, *, timeout: float, **kwargs):
         self.requested.append(url)
-        return _FakeResponse(self.text)
+        return _FakeResponse(self.text, url=url)
 
 
 class ClassifierGoldWorkflowTests(unittest.TestCase):
@@ -111,6 +122,20 @@ class ClassifierGoldWorkflowTests(unittest.TestCase):
         self.assertEqual(source, "cached_pdf")
         self.assertIn("PDF oficial", text)
         self.assertEqual(session.requested, [])
+
+    def test_evidence_prefers_remote_official_pdf_before_page(self) -> None:
+        row = self.sample_rows()[0]
+        row["summary"] = None
+        row["pdf_path"] = None
+        row["pdf_url"] = "https://busquedas.elperuano.pe/test.pdf"
+        session = _FakeSession("")
+        with patch(
+            "radar_laboral.classifier_sample._remote_pdf_excerpt",
+            return_value="Texto del PDF oficial remoto",
+        ):
+            source, text = build_evidence(row, session=session)
+        self.assertEqual(source, "remote_pdf")
+        self.assertIn("PDF oficial remoto", text)
 
     def test_evidence_uses_official_page_when_local_text_is_missing(self) -> None:
         row = self.sample_rows()[0]
