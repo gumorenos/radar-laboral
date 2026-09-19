@@ -141,6 +141,16 @@ Puede usarse un proveedor que implemente el contrato OpenAI-compatible cambiando
 
 El LLM recibe solamente el texto necesario para clasificación, con un máximo de 12 000 caracteres. Devuelve `labor_relevance`, `confidence`, `reason` y evidencia breve. Esa decisión se convierte en una señal semántica para el clasificador híbrido existente; no reemplaza las exclusiones administrativas fuertes.
 
+
+El runner también registra telemetría de la evaluación LLM: llamadas, tokens de entrada/salida cuando el proveedor los reporta, tiempo acumulado y latencia media. Si se definen precios por millón de tokens, añade un costo estimado:
+
+```text
+RADAR_LLM_INPUT_USD_PER_MILLION=<precio>
+RADAR_LLM_OUTPUT_USD_PER_MILLION=<precio>
+```
+
+Los precios no se asumen automáticamente porque cambian por proveedor y modelo; deben fijarse explícitamente para el experimento.
+
 ## 4. Gate de decisión
 
 Orden de prioridad del gate:
