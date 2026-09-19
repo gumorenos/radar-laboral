@@ -58,6 +58,24 @@ Con `--reuse-evidence`, las filas con evidencia previa distinta de `title_only` 
 
 No debe usarse la predicción de `rules_v4` como etiqueta gold. La etiqueta humana debe decidirse revisando la evidencia oficial disponible. Al convertir un CSV enriquecido, `radar-laboral-classifier-gold` pasa `evidence_text` al campo de texto legal que utiliza el benchmark, pero solo después de que exista la etiqueta humana.
 
+### Interfaz local de etiquetado
+
+Para evitar editar el CSV manualmente, puede abrirse una interfaz web local sobre la hoja ciega:
+
+```bash
+radar-laboral-classifier-review /ruta/classifier-labels-blind-enriched.csv
+```
+
+Por defecto escucha solo en `127.0.0.1:8765`. La interfaz:
+
+- muestra un caso por vez, con metadatos, evidencia y enlace a la fuente oficial;
+- nunca muestra columnas de predicción/scores de `rules_v4`;
+- se niega a abrir una hoja que contenga columnas del modelo;
+- permite etiquetar `relevant`, `review` o `not_labor`;
+- guarda cada decisión inmediatamente y de forma atómica en el mismo CSV;
+- conserva `human_notes` y permite retomar el trabajo después;
+- ofrece atajos de teclado 1/2/3 para las tres etiquetas.
+
 Ejemplo de conversión:
 
 ```bash
