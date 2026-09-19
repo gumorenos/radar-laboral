@@ -8,7 +8,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from radar_laboral.classifier_gold import load_labeled_rows, write_benchmark
-from radar_laboral.classifier_sample import build_evidence, write_label_sheet
+from radar_laboral.classifier_sample import (
+    build_evidence,
+    enrich_rows,
+    evidence_from_csv,
+    write_label_sheet,
+)
 
 
 class _FakeResponse:
@@ -221,6 +226,38 @@ class ClassifierGoldWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(case["evidence_source"], "official_page")
             self.assertEqual(case["evidence_chars"], 37)
+
+    def test_evidence_from_csv_reads_prior_enrichment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prior.csv"
+            path.write_text(
+                "id,evidence_source,evidence_chars,evidence_text\n"
+                "a,official_page,12,Texto previo\n",
+                encoding="utf-8-sig",
+            )
+            evidence = evidence_from_csv(path)
+        self.assertEqual(evidence["a"]["evidence_source"], "official_page")
+        self.assertEqual(evidence["a"]["evidence_chars"], 12)
+        self.assertEqual(evidence["a"]["evidence_text"], "Texto previo")
+
+    def test_enrich_rows_can_reuse_non_title_evidence(self) -> None:
+        row = self.sample_rows()[0]
+        row.update(
+            {
+                "evidence_source": "official_page",
+                "evidence_chars": 15,
+                "evidence_text": "Evidencia previa",
+            }
+        )
+        with patch("radar_laboral.classifier_sample.build_evidence") as build:
+            enriched = enrich_rows(
+                [row],
+                fetch_official=False,
+                reuse_existing=True,
+            )
+        build.assert_not_called()
+        self.assertEqual(enriched[0]["evidence_source"], "official_page")
+        self.assertEqual(enriched[0]["evidence_text"], "Evidencia previa")
 
     def test_invalid_human_label_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
