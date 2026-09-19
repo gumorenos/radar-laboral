@@ -162,6 +162,8 @@ Orden de prioridad del gate:
 
 No se habilita un modelo en Raspberry solo porque mejore accuracy. Debe justificar también RAM, latencia, tamaño y complejidad operativa.
 
+El resultado del runner expone `gate_pass`. Si **ningún** candidato logra cero falsos negativos, `recommended_by_gate` queda en `null`; se reporta solo un `diagnostic_leader` para saber cuál estuvo más cerca, sin presentarlo como candidato aprobado.
+
 ## 5. Arquitectura objetivo si el experimento gana
 
 ```text
