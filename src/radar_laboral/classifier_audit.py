@@ -40,6 +40,39 @@ def load_labeled_sample(path: Path) -> dict[str, dict[str, str]]:
     return result
 
 
+def population_counts_from_manifest(
+    manifest: dict[str, dict[str, str]]
+) -> dict[str, int] | None:
+    counts: dict[str, int] = {}
+    for row in manifest.values():
+        stratum = row["sampling_stratum"]
+        raw = row.get("stratum_population_count", "").strip()
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"stratum_population_count inválido para {stratum}: {raw!r}"
+            ) from exc
+        previous = counts.get(stratum)
+        if previous is not None and previous != value:
+            raise ValueError(
+                f"Manifest inconsistente: {stratum} tiene poblaciones {previous} y {value}"
+            )
+        counts[stratum] = value
+
+    if not counts:
+        return None
+    missing = sorted(VALID_LABELS.difference(counts))
+    if missing:
+        raise ValueError(
+            "Manifest con snapshot poblacional incompleto; faltan: "
+            + ", ".join(missing)
+        )
+    return counts
+
+
 def load_manifest(path: Path) -> dict[str, dict[str, str]]:
     rows = _read_csv(path)
     if not rows:
@@ -299,7 +332,10 @@ def main() -> None:
     parser.add_argument(
         "--population-from-db",
         action="store_true",
-        help="Pondera la muestra usando el conteo actual de cada estrato en SQLite",
+        help=(
+            "Sobrescribe el snapshot del manifest y pondera con el conteo ACTUAL "
+            "de cada estrato en SQLite"
+        ),
     )
     parser.add_argument(
         "--output",
@@ -311,7 +347,9 @@ def main() -> None:
 
     labels = load_labeled_sample(args.labels)
     manifest = load_manifest(args.manifest)
-    population_counts = population_counts_from_db() if args.population_from_db else None
+    population_counts = population_counts_from_manifest(manifest)
+    if args.population_from_db:
+        population_counts = population_counts_from_db()
     report = audit_sample(
         labels,
         manifest,
