@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import shutil
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -75,6 +76,7 @@ PAGE_TEMPLATE = r"""<!doctype html>
     <h1>Etiquetado completo</h1>
     <p>{{ labeled }} de {{ total }} casos tienen etiqueta humana.</p>
     <p class="hint">El CSV ya puede convertirse con radar-laboral-classifier-gold.</p>
+    <p><a class="official" href="{{ url_for('home', index=0) }}">Revisar etiquetas desde el inicio</a></p>
   </div>
   {% else %}
   <div class="top">
@@ -194,6 +196,10 @@ def load_sheet(path: Path) -> tuple[list[str], list[dict[str, str]]]:
 
 
 def _atomic_write(path: Path, fieldnames: Iterable[str], rows: list[dict[str, str]]) -> None:
+    backup = path.with_name(f"{path.stem}.pre-review-backup{path.suffix}")
+    if not backup.exists():
+        shutil.copy2(path, backup)
+
     fd, temp_name = tempfile.mkstemp(
         prefix=f".{path.name}.",
         suffix=".tmp",
@@ -242,7 +248,8 @@ def create_review_app(csv_path: Path) -> Flask:
         total = len(rows)
         labeled = sum(bool(row["human_label"].strip()) for row in rows)
 
-        if labeled == total:
+        raw_index = request.args.get("index")
+        if labeled == total and raw_index is None:
             return render_template_string(
                 PAGE_TEMPLATE,
                 done=True,
@@ -251,7 +258,7 @@ def create_review_app(csv_path: Path) -> Flask:
             )
 
         try:
-            index = int(request.args.get("index", ""))
+            index = int(raw_index or "")
         except ValueError:
             index = -1
 
