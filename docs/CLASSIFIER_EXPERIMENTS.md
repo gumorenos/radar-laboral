@@ -98,6 +98,27 @@ radar-laboral-classifier-gold \
   benchmarks/classifier_corpus_gold_v1.jsonl
 ```
 
+### Auditar rules_v4 después del etiquetado
+
+Una vez que el CSV ciego tenga las 300 etiquetas humanas, puede compararse contra el estrato original preservado en el manifest privado:
+
+```bash
+radar-laboral-classifier-audit \
+  /data/classifier-labels-blind-enriched-v2.csv \
+  --manifest /data/classifier-sampling-manifest-private.csv \
+  --output /data/classifier-audit-rules-v4.json
+```
+
+El reporte incluye:
+
+- matriz de confusión entre etiqueta humana y predicción original;
+- falsos negativos y falsos positivos por ID;
+- recall laboral, precisión de casos rastreados, especificidad no laboral y accuracy exacta sobre la muestra;
+- distribución de etiquetas humanas dentro de cada estrato de muestreo;
+- estimaciones ponderadas al corpus cuando el manifest contiene el snapshot poblacional de cada estrato.
+
+La muestra 100/100/100 fue estratificada por la predicción original, por lo que sus métricas sin ponderar son diagnósticas. El manifest guarda `stratum_population_count` para permitir post-estratificación con el tamaño del corpus al momento del muestreo. `--population-from-db` existe solo para sobrescribir ese snapshot con los conteos actuales de SQLite cuando se quiera analizar explícitamente el estado presente.
+
 ## 2. Comparar modelos locales
 
 Instala las dependencias opcionales en una máquina de evaluación, no en la Raspberry de producción:
