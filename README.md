@@ -155,7 +155,7 @@ El rango es inclusivo, se procesa día por día y conserva edición `regular` / 
 
 La clasificación es conservadora y versionada. La portada usa `tracked`, que incluye tanto `relevant` como `review`; los actos identificados como administrativos siguen ocultos en esa vista, pero permanecen en el inventario SQLite.
 
-La versión 3 amplía señales específicas de inspección laboral (`función inspectiva`, Sistema/Ley General de Inspección del Trabajo) y, a la vez, reconoce más patrones de nombramientos, conclusiones de designación y encargaturas. Al iniciar una versión nueva, SQLite reclasifica automáticamente filas generadas con una versión anterior del clasificador.
+La versión 4 combina reglas laborales específicas, referencias legales fuertes y exclusiones administrativas conservadoras. Distingue `relevant`, `review` y `not_labor`, conserva scores/evidencia auditables y reserva cualquier scorer semántico opcional para la zona incierta. Las exclusiones administrativas fuertes no se delegan al modelo. Al iniciar una versión nueva, SQLite reclasifica automáticamente filas generadas con una versión anterior del clasificador.
 
 ## SUNAFIL — Tribunal de Fiscalización Laboral
 
