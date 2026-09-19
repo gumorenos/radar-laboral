@@ -27,9 +27,9 @@ ALLOWED_OFFICIAL_HOST_SUFFIX = ".elperuano.pe"
 def _sample_select_sql(where_clause: str = "") -> str:
     return f"""
         SELECT id, publication_date, source, document_type, number, title, summary,
-               issuer, labor_relevance, relevance_reason, classification_score,
-               rule_score, classification_method, official_url, classification_text_excerpt,
-               pdf_url, pdf_path
+               issuer, labor_relevance, relevance_reason, classification_version,
+               classification_score, rule_score, classification_method, official_url,
+               classification_text_excerpt, pdf_url, pdf_path
         FROM norms
         {where_clause}
     """
@@ -391,6 +391,38 @@ def enrich_rows(
     return enriched
 
 
+def write_sampling_manifest(path: Path, rows: list[dict[str, object]]) -> None:
+    """Write a private sidecar preserving the sampling stratum and model state.
+
+    This file must not be shown to human annotators. It exists so the original
+    stratification remains reproducible even if the production classifier later
+    changes.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "id",
+        "sampling_stratum",
+        "classification_version",
+        "classification_score",
+        "rule_score",
+        "classification_method",
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    "id": row.get("id"),
+                    "sampling_stratum": row.get("labor_relevance"),
+                    "classification_version": row.get("classification_version"),
+                    "classification_score": row.get("classification_score"),
+                    "rule_score": row.get("rule_score"),
+                    "classification_method": row.get("classification_method"),
+                }
+            )
+
+
 def write_label_sheet(
     path: Path,
     rows: list[dict[str, object]],
@@ -517,6 +549,12 @@ def main() -> None:
         help="Pausa en segundos después de una página oficial usada como evidencia",
     )
     parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="Escribe un sidecar PRIVADO con estrato y estado del clasificador; no entregarlo al anotador",
+    )
+    parser.add_argument(
         "--include-model-output",
         action="store_true",
         help="Incluye predicción y scores actuales; por defecto el etiquetado es ciego",
@@ -554,6 +592,8 @@ def main() -> None:
         include_model_output=args.include_model_output,
         enriched=args.enrich,
     )
+    if args.manifest is not None:
+        write_sampling_manifest(args.manifest, rows)
     mode = "con predicción actual" if args.include_model_output else "ciego"
     suffix = ", enriquecido" if args.enrich else ""
     print(f"Exportados {len(rows)} registros a {args.output} (modo {mode}{suffix})")
