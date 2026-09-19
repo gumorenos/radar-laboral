@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +42,14 @@ class LLMDecision:
     evidence: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class LLMUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    elapsed_ms: float = 0.0
+
+
 class OpenAICompatibleSemanticScorer:
     """Optional API scorer for uncertain cases using an OpenAI-compatible endpoint.
 
@@ -66,6 +75,12 @@ class OpenAICompatibleSemanticScorer:
         self.timeout = float(timeout)
         self.session = session or requests.Session()
         self.last_decision: LLMDecision | None = None
+        self.last_usage: LLMUsage | None = None
+        self.call_count = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+        self.elapsed_ms = 0.0
 
     @classmethod
     def from_env(cls) -> "OpenAICompatibleSemanticScorer":
@@ -78,6 +93,7 @@ class OpenAICompatibleSemanticScorer:
         )
 
     def _request(self, text: str) -> dict[str, Any]:
+        started = time.perf_counter()
         response = self.session.post(
             f"{self.base_url}/chat/completions",
             headers={
@@ -96,7 +112,29 @@ class OpenAICompatibleSemanticScorer:
             timeout=self.timeout,
         )
         response.raise_for_status()
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
         payload = response.json()
+
+        usage = payload.get("usage") or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+        completion_tokens = int(
+            usage.get("completion_tokens") or usage.get("output_tokens") or 0
+        )
+        total_tokens = int(
+            usage.get("total_tokens") or (prompt_tokens + completion_tokens)
+        )
+        self.last_usage = LLMUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            elapsed_ms=elapsed_ms,
+        )
+        self.call_count += 1
+        self.prompt_tokens += prompt_tokens
+        self.completion_tokens += completion_tokens
+        self.total_tokens += total_tokens
+        self.elapsed_ms += elapsed_ms
+
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -118,6 +156,42 @@ class OpenAICompatibleSemanticScorer:
         evidence_raw = payload.get("evidence") or []
         evidence = tuple(str(item).strip() for item in evidence_raw if str(item).strip())[:5]
         return LLMDecision(relevance, confidence, reason, evidence)
+
+    @staticmethod
+    def _env_price(name: str) -> float | None:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            return None
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise RuntimeError(f"{name} debe ser numérico") from exc
+        if value < 0:
+            raise RuntimeError(f"{name} no puede ser negativo")
+        return value
+
+    def telemetry(self) -> dict[str, object]:
+        input_price = self._env_price("RADAR_LLM_INPUT_USD_PER_MILLION")
+        output_price = self._env_price("RADAR_LLM_OUTPUT_USD_PER_MILLION")
+        estimated_cost_usd: float | None = None
+        if input_price is not None and output_price is not None:
+            estimated_cost_usd = (
+                self.prompt_tokens * input_price
+                + self.completion_tokens * output_price
+            ) / 1_000_000.0
+
+        return {
+            "calls": self.call_count,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "elapsed_ms": round(self.elapsed_ms, 3),
+            "avg_latency_ms": round(
+                self.elapsed_ms / self.call_count if self.call_count else 0.0,
+                3,
+            ),
+            "estimated_cost_usd": estimated_cost_usd,
+        }
 
     def score(self, text: str) -> float:
         if not text.strip():
