@@ -23,6 +23,42 @@ def _summary(name: str, metrics: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _rank_key(row: dict[str, object]) -> tuple[float, float, float, float]:
+    return (
+        float(row["false_negatives"]),
+        -float(row["labor_recall"]),
+        -float(row["tracked_precision"]),
+        -float(row["exact_accuracy"]),
+    )
+
+
+def _gate_decision(results: list[dict[str, object]]) -> dict[str, object]:
+    diagnostic_leader = sorted(results, key=_rank_key)[0]
+    passing = [row for row in results if int(row["false_negatives"]) == 0]
+    if not passing:
+        return {
+            "gate_pass": False,
+            "recommended_by_gate": None,
+            "diagnostic_leader": diagnostic_leader["name"],
+            "gate_reason": "Ningún candidato logró cero falsos negativos laborales.",
+        }
+
+    winner = sorted(
+        passing,
+        key=lambda row: (
+            -float(row["labor_recall"]),
+            -float(row["tracked_precision"]),
+            -float(row["exact_accuracy"]),
+        ),
+    )[0]
+    return {
+        "gate_pass": True,
+        "recommended_by_gate": winner["name"],
+        "diagnostic_leader": diagnostic_leader["name"],
+        "gate_reason": "Al menos un candidato logró cero falsos negativos laborales.",
+    }
+
+
 def run_experiment(
     path: Path,
     *,
@@ -47,16 +83,12 @@ def run_experiment(
         llm_summary["llm_telemetry"] = scorer.telemetry()
         results.append(llm_summary)
 
-    best = sorted(
-        results,
-        key=lambda row: (
-            int(row["false_negatives"]),
-            -float(row["labor_recall"]),
-            -float(row["tracked_precision"]),
-            -float(row["exact_accuracy"]),
-        ),
-    )[0]
-    return {"benchmark": str(path), "results": results, "recommended_by_gate": best["name"]}
+    decision = _gate_decision(results)
+    return {
+        "benchmark": str(path),
+        "results": results,
+        **decision,
+    }
 
 
 def main() -> None:
