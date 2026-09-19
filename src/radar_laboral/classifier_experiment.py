@@ -43,7 +43,9 @@ def run_experiment(
     if use_llm:
         scorer = OpenAICompatibleSemanticScorer.from_env()
         metrics = evaluate_cases(cases, semantic_scorer=scorer)
-        results.append(_summary(f"rules_v4+{scorer.name}", metrics))
+        llm_summary = _summary(f"rules_v4+{scorer.name}", metrics)
+        llm_summary["llm_telemetry"] = scorer.telemetry()
+        results.append(llm_summary)
 
     best = sorted(
         results,
