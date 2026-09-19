@@ -95,6 +95,45 @@ class ClassifierReviewTests(unittest.TestCase):
             self.assertEqual(rows[0]["human_label"], "review")
             self.assertEqual(rows[0]["human_notes"], "Revisar alcance de la obligación")
 
+    def test_first_save_creates_pre_review_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labels.csv"
+            _write_sheet(path, [self.sample_row()])
+            app = create_review_app(path)
+            client = app.test_client()
+            response = client.post(
+                "/label",
+                data={
+                    "id": "elperuano:test-1",
+                    "human_label": "relevant",
+                    "human_notes": "",
+                    "index": "0",
+                },
+            )
+            self.assertEqual(response.status_code, 302)
+            backup = Path(tmp) / "labels.pre-review-backup.csv"
+            self.assertTrue(backup.exists())
+            _, original_rows = load_sheet(backup)
+            self.assertEqual(original_rows[0]["human_label"], "")
+
+    def test_completed_sheet_can_be_reopened_for_edits(self) -> None:
+        row = self.sample_row()
+        row["human_label"] = "relevant"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labels.csv"
+            _write_sheet(path, [row])
+            app = create_review_app(path)
+            client = app.test_client()
+
+            done = client.get("/")
+            self.assertIn("Etiquetado completo", done.get_data(as_text=True))
+
+            edit = client.get("/?index=0")
+            html = edit.get_data(as_text=True)
+            self.assertEqual(edit.status_code, 200)
+            self.assertIn("Regula una materia laboral", html)
+            self.assertNotIn("Etiquetado completo", html)
+
     def test_invalid_label_is_rejected_without_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "labels.csv"
