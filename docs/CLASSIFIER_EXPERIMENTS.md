@@ -27,10 +27,11 @@ La prioridad de evidencia es:
 
 1. `summary` almacenado, cuando existe;
 2. texto extraído del PDF oficial ya cacheado;
-3. texto recuperable desde la página oficial;
-4. título como fallback.
+3. texto extraído temporalmente del PDF oficial remoto, sin persistirlo;
+4. texto recuperable desde la página oficial, anclado en el título del documento cuando es posible;
+5. título como fallback.
 
-El CSV enriquecido añade `evidence_source`, `evidence_chars` y `evidence_text`. En modo ciego no muestra `classification_text_excerpt`, predicción, score, reason ni método del clasificador.
+El CSV enriquecido añade `evidence_source`, `evidence_chars` y `evidence_text`. `evidence_source` puede ser `summary`, `cached_pdf`, `remote_pdf`, `official_page` o `title_only`. En modo ciego no muestra `classification_text_excerpt`, predicción, score, reason ni método del clasificador. El PDF remoto usado para enriquecer la muestra se procesa en memoria y no se incorpora al cache productivo.
 
 Para enriquecer **exactamente los mismos IDs** de una muestra previa, sin volver a sortear el corpus:
 
