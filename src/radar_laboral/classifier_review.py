@@ -49,6 +49,10 @@ PAGE_TEMPLATE = r"""<!doctype html>
     nav a:hover, .official:hover { text-decoration:underline; }
     .done { text-align:center; padding:60px 20px; }
     .hint { color:#6d7480; font-size:.84rem; }
+    details { margin-top:16px; border-top:1px solid #e2e5e9; padding-top:12px; }
+    details summary { cursor:pointer; font-weight:650; }
+    .rubric { color:#505865; font-size:.9rem; line-height:1.45; }
+    .rubric strong { color:inherit; }
     @media (prefers-color-scheme:dark) {
       body { background:#111317; color:#eceff3; }
       .card { background:#191c21; border-color:#30353d; }
@@ -57,6 +61,8 @@ PAGE_TEMPLATE = r"""<!doctype html>
       button:hover { background:#282d35; }
       textarea { background:#12151a; color:#eceff3; border-color:#4a515c; }
       .source { background:#2a3038; }
+      details { border-color:#30353d; }
+      .rubric { color:#b8bec8; }
       nav a, .official { color:#89b9ef; }
     }
   </style>
@@ -114,6 +120,14 @@ PAGE_TEMPLATE = r"""<!doctype html>
       <a href="{{ url_for('home', index=next_unlabeled) }}">Siguiente sin etiquetar →</a>
     </nav>
     <p class="hint">El guardado es inmediato en el CSV. Atajos: 1 relevant · 2 review · 3 not_labor.</p>
+    <details>
+      <summary>Criterio de etiquetado</summary>
+      <div class="rubric">
+        <p><strong>Relevant:</strong> regula de forma sustantiva relaciones u obligaciones laborales: remuneración/beneficios, jornada, contratación/desvinculación, SST, inspección, relaciones colectivas, tercerización, teletrabajo, igualdad/acoso, licencias, trabajadores extranjeros, planillas o registros laborales.</p>
+        <p><strong>Not labor:</strong> no tiene contenido laboral sustantivo. Designaciones, renuncias, encargaturas, viajes, delegaciones y otros actos administrativos siguen siendo no laborales aunque los emita una entidad laboral.</p>
+        <p><strong>Review:</strong> la evidencia disponible no permite decidir responsablemente, o existe una relación laboral plausible pero realmente ambigua. No significa “importancia media”. Si solo hay título y no basta, use review.</p>
+      </div>
+    </details>
   </div>
 
   <script>
