@@ -74,6 +74,33 @@ def sample_ids_from_csv(path: Path) -> list[str]:
     return ids
 
 
+def evidence_from_csv(path: Path) -> dict[str, dict[str, object]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fields = set(reader.fieldnames or ())
+        required = {"id", "evidence_source", "evidence_text"}
+        if not required.issubset(fields):
+            return {}
+
+        evidence: dict[str, dict[str, object]] = {}
+        for raw in reader:
+            record_id = (raw.get("id") or "").strip()
+            source = (raw.get("evidence_source") or "").strip()
+            text = raw.get("evidence_text") or ""
+            if not record_id or not source or not text.strip():
+                continue
+            try:
+                chars = int((raw.get("evidence_chars") or "").strip())
+            except ValueError:
+                chars = len(text)
+            evidence[record_id] = {
+                "evidence_source": source,
+                "evidence_chars": chars,
+                "evidence_text": text,
+            }
+    return evidence
+
+
 def sample_by_ids(ids: list[str]) -> list[dict[str, object]]:
     if not ids:
         return []
@@ -315,6 +342,7 @@ def enrich_rows(
     timeout: float = DEFAULT_REQUEST_TIMEOUT,
     max_chars: int = DEFAULT_EVIDENCE_MAX_CHARS,
     official_delay_seconds: float = DEFAULT_OFFICIAL_DELAY_SECONDS,
+    reuse_existing: bool = False,
 ) -> list[dict[str, object]]:
     session: requests.Session | None = None
     if fetch_official:
@@ -329,13 +357,23 @@ def enrich_rows(
     enriched: list[dict[str, object]] = []
     try:
         for row in rows:
-            source, text = build_evidence(
-                row,
-                session=session,
-                fetch_official=fetch_official,
-                timeout=timeout,
-                max_chars=max_chars,
-            )
+            existing_source = str(row.get("evidence_source") or "").strip()
+            existing_text = str(row.get("evidence_text") or "")
+            if (
+                reuse_existing
+                and existing_source
+                and existing_source != "title_only"
+                and existing_text.strip()
+            ):
+                source, text = existing_source, existing_text[:max_chars]
+            else:
+                source, text = build_evidence(
+                    row,
+                    session=session,
+                    fetch_official=fetch_official,
+                    timeout=timeout,
+                    max_chars=max_chars,
+                )
             item = dict(row)
             item["evidence_source"] = source
             item["evidence_chars"] = len(text)
@@ -454,7 +492,12 @@ def main() -> None:
     parser.add_argument(
         "--enrich",
         action="store_true",
-        help="Añade evidencia ciega desde summary, PDF cacheado o página oficial",
+        help="Añade evidencia ciega desde summary, PDF oficial o página oficial",
+    )
+    parser.add_argument(
+        "--reuse-evidence",
+        action="store_true",
+        help="Con --from-csv enriquecido conserva evidencia no-title_only y reintenta solo fallbacks",
     )
     parser.add_argument(
         "--no-official-fetch",
@@ -482,8 +525,19 @@ def main() -> None:
 
     if args.from_csv is not None:
         rows = sample_by_ids(sample_ids_from_csv(args.from_csv))
+        if args.reuse_evidence:
+            previous_evidence = evidence_from_csv(args.from_csv)
+            for row in rows:
+                prior = previous_evidence.get(str(row.get("id") or ""))
+                if prior:
+                    row.update(prior)
     else:
+        if args.reuse_evidence:
+            parser.error("--reuse-evidence requiere --from-csv")
         rows = stratified_sample(max(1, args.per_class), seed=args.seed)
+
+    if args.reuse_evidence and not args.enrich:
+        parser.error("--reuse-evidence requiere --enrich")
 
     if args.enrich:
         rows = enrich_rows(
@@ -491,6 +545,7 @@ def main() -> None:
             fetch_official=not args.no_official_fetch,
             max_chars=max(1000, args.evidence_max_chars),
             official_delay_seconds=max(0.0, args.official_delay),
+            reuse_existing=args.reuse_evidence,
         )
 
     write_label_sheet(
