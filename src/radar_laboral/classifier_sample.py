@@ -107,6 +107,7 @@ def _official_page_excerpt(
     *,
     timeout: float,
     max_chars: int,
+    expected_title: str = "",
 ) -> str | None:
     response = session.get(url, timeout=timeout)
     response.raise_for_status()
@@ -130,6 +131,13 @@ def _official_page_excerpt(
     cleaned = normalize_pdf_text(text)
     if not cleaned:
         return None
+
+    title = normalize_pdf_text(expected_title)
+    if title:
+        index = cleaned.casefold().find(title.casefold())
+        if index >= 0:
+            cleaned = cleaned[index:]
+
     return select_legal_excerpt(cleaned, max_chars=max_chars)
 
 
@@ -287,6 +295,7 @@ def build_evidence(
                 official_url,
                 timeout=timeout,
                 max_chars=max_chars,
+                expected_title=str(row.get("title") or ""),
             )
         except (requests.RequestException, ValueError):
             excerpt = None
